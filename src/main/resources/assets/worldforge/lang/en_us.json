@@ -2,5 +2,6 @@
   "item.worldforge.dynamic_item": "WorldForge Dynamic Item",
   "key.categories.worldforge": "WorldForge",
   "key.worldforge.panel": "Open WorldForge Panel",
-  "text.worldforge.panel_title": "WorldForge Virtual Items"
+  "text.worldforge.panel_title": "WorldForge Virtual Items",
+  "key.worldforge.studio": "Open WorldForge Studio"
 }

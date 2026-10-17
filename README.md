@@ -1,4 +1,4 @@
-# WorldForge — Minecraft 运行时动态物品引擎 (MVP 0.1 / v0.1.2)
+# WorldForge — Minecraft 运行时动态物品引擎 + 游戏内可视化编辑器 (v0.2.0)
 
 [![build](https://img.shields.io/badge/build-passing-brightgreen)]() [![MC](https://img.shields.io/badge/Minecraft-1.21.1-green)]() [![Loader](https://img.shields.io/badge/Fabric-Loader%200.16.9-blue)]()
 
@@ -11,6 +11,34 @@ WorldForge 的目标是成为 Minecraft 游戏内的 AI Mod 开发环境：玩�
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**（distributionUrl 已指向腾讯镜像，可改回 services.gradle.org）
 
 ---
+
+## 一·五、v0.2.0 — WorldForge Studio 游戏内可视化编辑器
+
+按 K（可在原版控制设置里改键）打开 **WorldForge Studio**：
+
+```text
+┌─────────────────────────────────────────────┐
+│ WorldForge Studio            当前世界（单人）│
+├────────────┬────────────────────────────────┤
+│ 物品列表    │  名称/ID/描述 输入框            │
+│ (图标+滚动) │  伤害 | 耐久                    │
+│            │  外观: [钻石剑]（原版槽位选择器）│
+│ ● 未保存   │  触发: right_click  动作: 闪电  │
+│            │  参数 | 冷却tick                 │
+│            │  [保存][＋加入行为][获取测试][删除]│
+├────────────┴────────────────────────────────┤
+│ 状态栏：已同步服务端列表 · 10 个物品          │
+└─────────────────────────────────────────────┘
+```
+
+操作流程：`＋创建物品 → 填 ID/名称 → 选外观（15 个原版贴图槽位目录）→ 填伤害/耐久 → 配触发+动作+参数+冷却 → ＋加入行为 → 保存 → 获取测试 → ESC 关闭直接玩`。
+
+设计要点（对应验收原则）：
+- **GUI 是纯视图层**：所有修改走 C2S `studio_request` → 服务端复核 OP2 权限（与 `/wf` 写命令同阈值，GUI 永远拿不到更高权限）→ 服务端全量校验（ID 形状/长度上限/数值范围/行为白名单）→ **WorldForgeTools 统一管线**（与命令、未来 AI Agent 同一入口）→ 落盘（失败回滚）→ 背包存量堆热重烘 → 权威快照回包。
+- **草稿模型**：敲键盘不写盘；「保存」才提交；未保存标记 + 返回时二次确认防误丢；ID 创建后不可改（防引用漂移）。
+- **反馈完整**：加载/保存中/成功/失败（权限、参数、持久化、同步 PARTIAL/FAILED 分开呈现）；请求带 requestId，过期回包直接丢弃不覆盖新编辑；5 秒超时解除锁定并提示"刷新核对而非盲目重发"。
+- **联机安全**：连到没装 WorldForge 的服务器时显示只读提示、不发送任何请求；断线清空客户端状态。
+- 删除定义弹确认页，明确说明"删除定义 ≠ 删除背包物品，存量进入失效标记，重建同名 ID 自动恢复"。
 
 ## 一、快速开始
 
@@ -222,7 +250,7 @@ src/main/resources/
 git clone https://github.com/MUERJUN/WorldForge
 cd WorldForge
 ./gradlew build          # 编译 + JUnit
-./gradlew runGameTest    # 真实服务端验收测试 A~H
+./gradlew runGameTest    # 真实服务端验收测试（25 项：A-H + R1-R12 + S1-S4）
 ./gradlew runClient      # 进游戏手测：/wf demo → /wf give …
 ```
 
