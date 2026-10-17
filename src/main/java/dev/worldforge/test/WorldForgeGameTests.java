@@ -211,12 +211,15 @@ public class WorldForgeGameTests {
 		// Re-bind to the *actual* run directory like SERVER_STARTED does,
 		// then create + verify a file appears inside the world folder.
 		WorldForgeRuntimeManager.onServerStarted(ctx.getWorld().getServer());
+		// idempotent: re-runs against a persisted world may already know this id
+		WorldForgeRuntimeManager.deleteItem("worldforge:persist_real");
 		ItemDefinition def = new ItemDefinition(ItemDefinition.CURRENT_VERSION,
 				"worldforge:persist_real", "真实存档持久化", "写入世界目录",
 				TextureSource.vanilla("minecraft:item/emerald"),
 				Map.of("damage", 3.0, "max_durability", 64.0),
 				List.of());
-		ctx.assertTrue(WorldForgeRuntimeManager.createItem(def).ok(), "createItem must succeed");
+		var cr = WorldForgeRuntimeManager.createItem(def);
+		ctx.assertTrue(cr.ok(), "createItem must succeed, got: " + cr.message());
 
 		Path worldDir = ctx.getWorld().getServer().getSavePath(net.minecraft.util.WorldSavePath.ROOT);
 		Path itemsFile = worldDir.resolve("worldforge").resolve("items.json");
