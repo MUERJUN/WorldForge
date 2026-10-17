@@ -23,20 +23,22 @@ sha256sum build/libs/worldforge-0.1.1.jar build/libs/worldforge-0.1.1-sources.ja
 `reproducibleFileOrder=true`，配合 `.gitattributes` 强制 `eol=lf`），
 因此不同机器 / 不同时间的干净构建应得到相同哈希。
 
-## v0.1.1 发布产物 SHA-256（待填，见下方“本次核查结果”）
+## v0.1.1 发布产物 SHA-256
+
+发布代码 commit：`053be25`；tag `v0.1.1` = `5c01ab6`（其后仅文档变更，JAR 逐字节不变）。
 
 | 产物 | SHA-256 |
 |---|---|
-| worldforge-0.1.1.jar | `0d4b88e02b2037d3d0555f0a13047c2923787aa78e0d1072a0c5d5a9fc566e05` |
-| worldforge-0.1.1-sources.jar | `cc8448b54640d120c19e2af61757b8af2b002fa14af8e0a6d594e10f12c58fec` |
+| worldforge-0.1.1.jar | `29c380922f383ce8283f871b8fdfc675650942d5c70b3bb23c06efc7278fdfef` |
+| worldforge-0.1.1-sources.jar | `f494714e97d7aaaf3aa4fb903dc6bbce9c5cfc2b697d745f0ff8fc68db659c3b` |
 
 ## 本次核查结果（真实执行，非声称）
 
-- **独立干净克隆 @ tag v0.1.1**：`./gradlew build` 成功；上表两个 SHA 与主工作区
-  构建输出**逐字节一致**（`sha256sum` 相同），证明 tag 源码 == Release JAR。
-- **同一干净克隆直接跑真实服务端 GameTest**：`All 14 required tests passed`（0 失败）。
-- **GitHub Release**：v0.1.1 附的 `worldforge-0.1.1.jar` 下载后重算 SHA，应与上表一致
-  （发布脚本用同一构建产物，见 CHANGELOG）。
+- **独立干净克隆 @ tag v0.1.1**（fresh clone、`./gradlew clean build`）：上表两个
+  SHA 与主工作区构建输出**逐字节一致**（`sha256sum` 相同），证明 tag 源码 == Release JAR。
+- **同一干净克隆直接跑真实服务端 GameTest**：`All 15 required tests passed`（0 失败）；
+  其中 R1/R1b/R2/R3 四项在 v0.1.0 源码上运行得到 FAILED（问题复现，见 CHANGELOG）。
+- **GitHub Release 下载回验**：Release 附件下载回本地重算 SHA，与上表一致。
 
 ## v0.1.0 曾存在的不一致（本迭代的发现，如实记录，不回改历史）
 
