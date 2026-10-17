@@ -23,9 +23,10 @@ public final class ClientStudioState {
 	private static final Set<String> TOMBSTONES = ConcurrentHashMap.newKeySet();
 	private static volatile boolean serverReady = false;
 
-	public static void applySnapshot(String snapshotJson) {
+	/** @return false when the snapshot could not be parsed (caller must show an error) */
+	public static boolean applySnapshot(String snapshotJson) {
 		if (snapshotJson == null || snapshotJson.isBlank()) {
-			return;
+			return true; // nothing to apply (oversized-snapshot case)
 		}
 		try {
 			JsonObject o = com.google.gson.JsonParser.parseString(snapshotJson).getAsJsonObject();
@@ -48,8 +49,12 @@ public final class ClientStudioState {
 			}
 			TOMBSTONES.addAll(tombs);
 			serverReady = true;
-		} catch (Exception ignored) {
-			// malformed snapshot: keep previous view; the GUI shows its own error
+			return true;
+		} catch (Exception e) {
+			// v0.3.0 fix: previously swallowed -> GUI still claimed "synced".
+			// Keep the previous view but report failure to the caller.
+			serverReady = false;
+			return false;
 		}
 	}
 

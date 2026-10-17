@@ -115,19 +115,35 @@ public class WorldForgeStudioScreen extends Screen {
 
 		button(x0 + 8, y0 + panelH - 46, lw, 18, "＋ 创建物品", b -> enterCreate());
 		button(x0 + 8, y0 + panelH - 26, lw / 2 - 2, 16, "刷新", b -> sendRequest("list", ""));
-		button(x0 + 8 + lw / 2 + 2, y0 + panelH - 26, lw / 2 - 2, 16, "关闭 (ESC)", b -> close());
+		button(x0 + 8 + lw / 2 + 2, y0 + panelH - 26, lw / 2 - 2, 16, "关闭 (ESC)", b -> guardedClose());
 
 		refreshDraftWidgets();
 		applyMode();
 		sendRequest("list", "");
 	}
 
+	private boolean programmatic = false;
+
 	private TextFieldWidget field(int x, int y, int w, String ph) {
 		TextFieldWidget f = new TextFieldWidget(textRenderer, x, y, w, 18, Text.literal(ph));
 		f.setPlaceholder(Text.literal(ph));
-		f.setChangedListener(s -> dirty = true);
+		f.setChangedListener(str -> {
+			if (!programmatic) {
+				dirty = true; // v0.3.0 fix: our own setText() used to mark drafts dirty
+			}
+		});
 		addDrawableChild(f);
 		return f;
+	}
+
+	/** populate fields without tripping the dirty flag */
+	private void fillFields(Runnable r) {
+		programmatic = true;
+		try {
+			r.run();
+		} finally {
+			programmatic = false;
+		}
 	}
 
 	private ButtonWidget button(int x, int y, int w, int h, String label, java.util.function.Consumer<ButtonWidget> press) {
@@ -173,14 +189,16 @@ public class WorldForgeStudioScreen extends Screen {
 		draftTexture = AppearanceSlots.DEFAULT_TEXTURE;
 		draftTrigger = "right_click";
 		draftAction = "summon_lightning";
-		idField.setText("worldforge:");
-		nameField.setText("新物品");
-		descField.setText("");
-		damageField.setText("4");
-		durabilityField.setText("100");
-		cooldownField.setText("100");
-		param1.setText("");
-		param2.setText("");
+		fillFields(() -> {
+			idField.setText("worldforge:");
+			nameField.setText("新物品");
+			descField.setText("");
+			damageField.setText("4");
+			durabilityField.setText("100");
+			cooldownField.setText("100");
+			param1.setText("");
+			param2.setText("");
+		});
 		refreshDraftWidgets();
 		setMode(Mode.CREATE);
 		setStatus("§7填写后点「保存」创建；ID 创建后不可修改");
@@ -194,11 +212,6 @@ public class WorldForgeStudioScreen extends Screen {
 		selectedId = d.id();
 		editorWasEditing = true;
 		dirty = false;
-		idField.setText(d.id());
-		nameField.setText(d.name() == null ? "" : d.name());
-		descField.setText(d.description() == null ? "" : d.description());
-		damageField.setText(trim(d.damage()));
-		durabilityField.setText(String.valueOf(d.maxDurability()));
 		draftTexture = d.texture() == null ? AppearanceSlots.DEFAULT_TEXTURE : d.texture().resource();
 		draftBehaviors.clear();
 		draftBehaviors.addAll(d.behaviors());
@@ -206,19 +219,46 @@ public class WorldForgeStudioScreen extends Screen {
 			BehaviorDefinition b0 = draftBehaviors.get(draftBehaviors.size() - 1);
 			draftTrigger = b0.trigger();
 			draftAction = b0.actions().isEmpty() ? draftAction : b0.actions().get(0);
-			cooldownField.setText(String.valueOf(b0.cooldownTicks()));
-			param1.setText(String.valueOf(b0.parameters().getOrDefault(paramKey1(), "")).replace("null", ""));
-			param2.setText(String.valueOf(b0.parameters().getOrDefault(paramKey2(), "")).replace("null", ""));
-		} else {
-			cooldownField.setText("100");
-			param1.setText("");
-			param2.setText("");
 		}
+		fillFields(() -> {
+			idField.setText(d.id());
+			nameField.setText(d.name() == null ? "" : d.name());
+			descField.setText(d.description() == null ? "" : d.description());
+			damageField.setText(trim(d.damage()));
+			durabilityField.setText(String.valueOf(d.maxDurability()));
+			if (!draftBehaviors.isEmpty()) {
+				BehaviorDefinition b0 = draftBehaviors.get(draftBehaviors.size() - 1);
+				cooldownField.setText(String.valueOf(b0.cooldownTicks()));
+				param1.setText(String.valueOf(b0.parameters().getOrDefault(paramKey1(), "")).replace("null", ""));
+				param2.setText(String.valueOf(b0.parameters().getOrDefault(paramKey2(), "")).replace("null", ""));
+			} else {
+				cooldownField.setText("100");
+				param1.setText("");
+				param2.setText("");
+			}
+		});
 		refreshDraftWidgets();
 		setMode(Mode.EDIT);
 	}
 
+	private boolean closeArmed = false;
+
+	/** v0.3.0 fix: closing with unsaved edits warns first (double-press to confirm). */
+	private void guardedClose() {
+		if ((mode == Mode.EDIT || mode == Mode.CREATE) && dirty) {
+			if (closeArmed) {
+				close();
+				return;
+			}
+			closeArmed = true;
+			setStatus("§e存在未保存修改：再点「关闭」将放弃草稿并退出编辑器");
+			return;
+		}
+		close();
+	}
+
 	private void tryLeaveEditor() {
+		closeArmed = false;
 		if (dirty) {
 			if (statusLine.startsWith("§e")) {
 				dirty = false;
@@ -397,6 +437,10 @@ public class WorldForgeStudioScreen extends Screen {
 		draftBehaviors.removeIf(x -> x.trigger().equals(b.trigger()) && x.actions().equals(b.actions()));
 		draftBehaviors.add(b);
 		dirty = true;
+		fillFields(() -> {
+			param1.setText("");
+			param2.setText("");
+		});
 		setStatus("§a行为已加入草稿（共 " + draftBehaviors.size() + " 条），点「保存」提交到服务端");
 	}
 
@@ -426,17 +470,9 @@ public class WorldForgeStudioScreen extends Screen {
 			setStatus("§c耐久必须是整数");
 			return;
 		}
-		// fold an as-yet-uncommitted trigger/action/params draft into the list
-		if (!param1.getText().trim().isEmpty() || !cooldownField.getText().trim().isEmpty()) {
-			BehaviorDefinition pending = buildDraftBehavior();
-			if (pending == null) {
-				return; // status explains the bad input
-			}
-			draftBehaviors.removeIf(x -> x.trigger().equals(pending.trigger()) && x.actions().equals(pending.actions()));
-			draftBehaviors.add(pending);
-			param1.setText("");
-			param2.setText("");
-		}
+		// v0.3.0 fix: behaviors are ONLY added via the explicit "+行为" button.
+		// The old auto-fold fired whenever the pre-filled cooldown ("100") was
+		// non-empty, so every saved item silently gained summon_lightning.
 		com.google.gson.JsonObject body = new com.google.gson.JsonObject();
 		body.addProperty("version", ItemDefinition.CURRENT_VERSION);
 		body.addProperty("id", id);
@@ -556,14 +592,18 @@ public class WorldForgeStudioScreen extends Screen {
 		}
 
 		// any successful response (except give) carries the authoritative snapshot
+		boolean snapshotOk = true;
 		if (!r.snapshot().isEmpty()) {
-			ClientStudioState.applySnapshot(r.snapshot());
+			snapshotOk = ClientStudioState.applySnapshot(r.snapshot());
 			rows = ClientStudioState.list();
 		}
 
+		String snapWarn = snapshotOk ? "" : " §c(快照解析失败，请点刷新)";
 		switch (kind) {
-			case "list" -> setStatus("§a已同步服务端列表 · " + rows.size() + " 个物品"
-					+ (ClientStudioState.tombstones().isEmpty() ? "" : " · §c" + ClientStudioState.tombstones().size() + " 个失效标记"));
+			case "list" -> setStatus((snapshotOk
+					? "§a已同步服务端列表 · " + rows.size() + " 个物品"
+							+ (ClientStudioState.tombstones().isEmpty() ? "" : " · §c" + ClientStudioState.tombstones().size() + " 个失效标记")
+					: "§c列表快照无效 - 请点刷新重试") + snapWarn);
 			case "create" -> {
 				dirty = false;
 				String newId = idField.getText().trim();
@@ -615,8 +655,10 @@ public class WorldForgeStudioScreen extends Screen {
 	@Override
 	public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
 		renderBackground(ctx, mouseX, mouseY, delta);
-		super.render(ctx, mouseX, mouseY, delta);
 
+		// v0.3.0 fix: the panel backdrop and static layers must be painted
+		// BEFORE super.render(), which draws the widget tree on top. The old
+		// order (widgets first, then an opaque fill) covered every button.
 		ctx.fill(x0, y0, x0 + panelW, y0 + panelH, 0xC8101014);
 		ctx.drawBorder(x0, y0, panelW, panelH, 0x90FFFFFF);
 		ctx.drawTextWithShadow(textRenderer, Text.literal("§b§lWorldForge Studio"), x0 + 8, y0 + 8, 0xFFFFFF);
@@ -630,11 +672,7 @@ public class WorldForgeStudioScreen extends Screen {
 			ctx.drawTextWithShadow(textRenderer, "§e● 未保存的修改", x0 + panelW - 100, y0 + 18, 0xFFFF55);
 		}
 
-		if (mode == Mode.APPEAR_PICK) {
-			renderPicker(ctx, mouseX, mouseY);
-		} else if (mode == Mode.DELETE_CONFIRM) {
-			renderDeleteConfirm(ctx);
-		} else if (mode == Mode.LIST) {
+		if (mode == Mode.LIST) {
 			int rx = x0 + 176;
 			ctx.drawTextWithShadow(textRenderer, "§7点击左侧物品进行编辑", rx, y0 + 32, 0xAAAAAA);
 			ctx.drawTextWithShadow(textRenderer, "§7或「＋ 创建物品」新建", rx, y0 + 44, 0xAAAAAA);
@@ -651,6 +689,28 @@ public class WorldForgeStudioScreen extends Screen {
 
 		ctx.fill(x0, y0 + panelH - 14, x0 + panelW, y0 + panelH, 0xFF0A0A12);
 		ctx.drawTextWithShadow(textRenderer, clip(statusLine, panelW - 16), x0 + 6, y0 + panelH - 11, 0xFFFFFF);
+
+		// widgets (buttons/fields) render on top of the panel backdrop
+		super.render(ctx, mouseX, mouseY, delta);
+
+		// modal overlays draw above widgets
+		if (mode == Mode.APPEAR_PICK) {
+			renderPickerOverlay(ctx, mouseX, mouseY);
+		} else if (mode == Mode.DELETE_CONFIRM) {
+			renderDeleteConfirmOverlay(ctx);
+		}
+	}
+
+	private void renderPickerOverlay(DrawContext ctx, int mouseX, int mouseY) {
+		int ox = x0 + 160, oy = y0 + 16, ow = panelW - 168, oh = panelH - 40;
+		ctx.fill(ox, oy, ox + ow, oy + oh, 0xF014141C);
+		renderPickerContent(ctx, mouseX, mouseY);
+	}
+
+	private void renderDeleteConfirmOverlay(DrawContext ctx) {
+		int ox = x0 + 90, oy = y0 + 60, ow = panelW - 180, oh = 130;
+		ctx.fill(ox, oy, ox + ow, oy + oh, 0xF414141C);
+		renderDeleteConfirmContent(ctx);
 	}
 
 	private void renderListColumn(DrawContext ctx, int mouseX, int mouseY) {
@@ -711,9 +771,8 @@ public class WorldForgeStudioScreen extends Screen {
 
 	// ---------- appearance picker ----------
 
-	private void renderPicker(DrawContext ctx, int mouseX, int mouseY) {
+	private void renderPickerContent(DrawContext ctx, int mouseX, int mouseY) {
 		int ox = x0 + 160, oy = y0 + 16, ow = panelW - 168, oh = panelH - 40;
-		ctx.fill(ox, oy, ox + ow, oy + oh, 0xF014141C);
 		ctx.drawBorder(ox, oy, ow, oh, 0xFF6A6A9E);
 		ctx.drawTextWithShadow(textRenderer, "§b选择外观（原版贴图槽位目录）", ox + 8, oy + 6, 0xFFFFFF);
 		ctx.drawTextWithShadow(textRenderer, "§7当前: " + draftTexture, ox + 8, oy + 17, 0x909090);
@@ -735,9 +794,8 @@ public class WorldForgeStudioScreen extends Screen {
 
 	// ---------- delete confirm ----------
 
-	private void renderDeleteConfirm(DrawContext ctx) {
+	private void renderDeleteConfirmContent(DrawContext ctx) {
 		int ox = x0 + 90, oy = y0 + 60, ow = panelW - 180, oh = 130;
-		ctx.fill(ox, oy, ox + ow, oy + oh, 0xF414141C);
 		ctx.drawBorder(ox, oy, ow, oh, 0xFF8A3A3A);
 		ctx.drawCenteredTextWithShadow(textRenderer, "§c确认删除该物品定义？", ox + ow / 2, oy + 14, 0xFFFFFF);
 		ctx.drawCenteredTextWithShadow(textRenderer, "§f" + clip(selectedId == null ? "" : selectedId, ow - 20), ox + ow / 2, oy + 28, 0xCCCCCC);

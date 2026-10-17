@@ -200,9 +200,21 @@ public final class WorldForgeStudioProtocol {
 
 	private static void reply(MinecraftServer server, ServerPlayerEntity player, int reqId,
 			boolean ok, String phase, String message, boolean withSnapshot) {
-		String snapshot = withSnapshot ? currentSnapshotJson() : "";
-		StudioResponse resp = new StudioResponse(reqId, ok, phase, truncate(message, 512),
-				truncate(snapshot, MAX_PAYLOAD_CHARS));
+		// v0.3.0 fix: a truncated snapshot is INVALID JSON and the client would
+		// silently keep stale state. Never cut JSON mid-stream: when the
+		// snapshot exceeds the wire cap, omit it and tell the player to refresh.
+		String snapshot = "";
+		String snapshotNote = "";
+		if (withSnapshot) {
+			String full = currentSnapshotJson();
+			if (full.length() <= MAX_PAYLOAD_CHARS) {
+				snapshot = full;
+			} else {
+				snapshotNote = "（快照过大已省略，请点刷新获取列表）";
+			}
+		}
+		StudioResponse resp = new StudioResponse(reqId, ok, phase, truncate(message, 512) + snapshotNote,
+				snapshot);
 		// test hook: the business GameTest suite observes production responses
 		// without a real client connection (mock players cannot "receive").
 		var sink = RESPONSE_SINK;
