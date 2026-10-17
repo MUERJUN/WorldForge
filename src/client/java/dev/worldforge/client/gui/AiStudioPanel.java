@@ -187,39 +187,30 @@ public final class AiStudioPanel {
 		if (phase == Phase.THINKING) {
 			ctx.drawTextWithShadow(tr, "§eAI 思考中…（服务端异步调用模型，不会卡游戏）", x + 4, y + h - 34, 0xFFFF60);
 		}
-		// bottom row: input + buttons
-		input.render(ctx, mouseX, mouseY, 0f);
-		sendBtn.visible = phase != Phase.PROPOSAL && phase != Phase.THINKING;
-		sendBtn.active = phase == Phase.IDLE;
-		confirmBtn.visible = cancelBtn.visible = phase == Phase.PROPOSAL;
-		sendBtn.render(ctx, mouseX, mouseY, 0f);
-		confirmBtn.render(ctx, mouseX, mouseY, 0f);
-		cancelBtn.render(ctx, mouseX, mouseY, 0f);
+		// v0.3.1 fix: the input field and buttons are part of the Screen widget
+		// tree (added via addDrawableChild) and are rendered/focused/clicked by
+		// vanilla machinery. The old manual render calls drew them twice and -
+		// worse - the input was never in the tree, so it could not be focused
+		// and every keystroke was dead.
 	}
 
-	public boolean click(double mx, double my) {
-		if (phase == Phase.PROPOSAL) {
-			if (confirmBtn.isHovered() || cancelBtn.isHovered()) {
-				return false; // let the widget handle it
-			}
-		} else if (sendBtn.isHovered() || input.isMouseOver(mx, my)) {
-			return false;
+	/** called by the Screen every applyMode(): gate widget visibility */
+	public void applyVisibility(boolean aiMode) {
+		input.visible = aiMode;
+		input.active = aiMode;
+		sendBtn.visible = aiMode && phase != Phase.PROPOSAL;
+		sendBtn.active = aiMode && phase == Phase.IDLE;
+		confirmBtn.visible = aiMode && phase == Phase.PROPOSAL;
+		cancelBtn.visible = aiMode && phase == Phase.PROPOSAL;
+	}
+
+	/** true when ENTER should be swallowed to send (only in AI mode, idle) */
+	public boolean trySendOnEnter() {
+		if (phase == Phase.IDLE) {
+			sendBtn.onPress();
+			return true;
 		}
 		return false;
-	}
-
-	public boolean charTyped(char chr, int modifiers) {
-		return input.charTyped(chr, modifiers);
-	}
-
-	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-		if (keyCode == 257 || keyCode == 335) { // ENTER sends
-			if (phase == Phase.IDLE) {
-				sendBtn.onPress();
-				return true;
-			}
-		}
-		return input.keyPressed(keyCode, scanCode, modifiers);
 	}
 
 	public String pendingProposalId() {
@@ -228,6 +219,11 @@ public final class AiStudioPanel {
 
 	public boolean hasPending() {
 		return pendingProposalId != null;
+	}
+
+	/** the chat input widget (the Screen puts it in the widget tree + focuses it) */
+	public TextFieldWidget inputWidget() {
+		return input;
 	}
 
 	public String pendingItemId() {

@@ -128,6 +128,7 @@ public class WorldForgeStudioScreen extends Screen {
 		for (var b : aiPanel.buttons()) {
 			addDrawableChild(b);
 		}
+		addDrawableChild(aiPanel.input()); // v0.3.1 fix: focusable text field
 
 		refreshDraftWidgets();
 		applyMode();
@@ -181,10 +182,10 @@ public class WorldForgeStudioScreen extends Screen {
 					saveButton, addButton, giveButton, deleteButton, backButton}) {
 				b.visible = false;
 			}
-			aiPanel.input().visible = true;
+			aiPanel.applyVisibility(true);
 			return;
 		}
-		aiPanel.input().visible = false;
+		aiPanel.applyVisibility(false);
 		boolean editor = mode == Mode.EDIT || mode == Mode.CREATE;
 		idField.visible = mode == Mode.CREATE; // id immutable once created (spec 5.1)
 		idField.active = mode == Mode.CREATE;
@@ -207,6 +208,8 @@ public class WorldForgeStudioScreen extends Screen {
 	}
 
 	private void enterCreate() {
+		discardArmed = false;
+		closeArmed = false;
 		selectedId = null;
 		editorWasEditing = false;
 		dirty = false;
@@ -237,6 +240,8 @@ public class WorldForgeStudioScreen extends Screen {
 		selectedId = d.id();
 		editorWasEditing = true;
 		dirty = false;
+		discardArmed = false;
+		closeArmed = false;
 		draftTexture = d.texture() == null ? AppearanceSlots.DEFAULT_TEXTURE : d.texture().resource();
 		draftBehaviors.clear();
 		draftBehaviors.addAll(d.behaviors());
@@ -266,10 +271,17 @@ public class WorldForgeStudioScreen extends Screen {
 		setMode(Mode.EDIT);
 	}
 
+	private void setSelectedField(TextFieldWidget f) {
+		if (client != null) {
+			setInitialFocus(f);
+		}
+	}
+
 	private boolean closeArmed = false;
 
 	/** v0.3.0 fix: closing with unsaved edits warns first (double-press to confirm). */
 	private void guardedClose() {
+		discardArmed = false;
 		if ((mode == Mode.EDIT || mode == Mode.CREATE) && dirty) {
 			if (closeArmed) {
 				close();
@@ -284,20 +296,35 @@ public class WorldForgeStudioScreen extends Screen {
 
 	private void enterAi() {
 		setMode(Mode.AI);
+		setSelectedField(aiPanel.inputWidget()); // focus the chat input once, on entry
 	}
+
+	/**
+	 * v0.3.1 P1 fix: the "press twice to discard" guard used to be inferred
+	 * from the status line text (statusLine.startsWith("§e")). Any other
+	 * message overwriting the status bar (e.g. a server reply or a hint)
+	 * permanently disarmed the guard, so the player could never leave the
+	 * editor - exactly the "cannot cancel / cannot close" report. The armed
+	 * state is now an explicit flag, reset on every entry and every other
+	 * action, and never derived from display text.
+	 */
+	private boolean discardArmed = false;
 
 	private void tryLeaveEditor() {
 		closeArmed = false;
 		if (dirty) {
-			if (statusLine.startsWith("§e")) {
+			if (discardArmed) {
+				discardArmed = false;
 				dirty = false;
 				setMode(Mode.LIST);
 				sendRequest("list", "");
 				return;
 			}
+			discardArmed = true;
 			setStatus("§e存在未保存修改：再点「返回」将放弃草稿");
 			return;
 		}
+		discardArmed = false;
 		setMode(Mode.LIST);
 	}
 
@@ -308,8 +335,8 @@ public class WorldForgeStudioScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-		if (mode == Mode.AI && aiPanel.keyPressed(keyCode, scanCode, modifiers)) {
-			return true;
+		if (mode == Mode.AI && (keyCode == 257 || keyCode == 335) && aiPanel.trySendOnEnter()) {
+			return true; // ENTER sends in the AI panel
 		}
 		if (keyCode == 256) { // GLFW_ESCAPE
 			switch (mode) {
@@ -322,6 +349,14 @@ public class WorldForgeStudioScreen extends Screen {
 					return true;
 				}
 				case AI -> {
+					// v0.3.1: ESC is layered so it can never trap the player:
+					// with a pending proposal -> cancel that proposal only
+					// (server clears PENDING, world untouched);
+					// otherwise -> back to LIST; from LIST -> closes the screen.
+					if (aiPanel.hasPending()) {
+						sendRequest("agent_cancel", jsonOf("proposalId", aiPanel.pendingProposalId()));
+						return true;
+					}
 					setMode(Mode.LIST);
 					return true;
 				}
@@ -613,6 +648,10 @@ public class WorldForgeStudioScreen extends Screen {
 		if ("agent".equals(r.phase()) && r.requestId() == 0) {
 			// unsolicited AI outcome (async model completion)
 			aiPanel.onAgentEvent(r);
+			// v0.3.1: the phase changed (IDLE <-> THINKING <-> PROPOSAL), which
+			// decides which panel widgets are visible/active. Without this the
+			// 确认/取消 buttons never appear when a proposal arrives.
+			applyMode();
 			setStatus(r.ok() ? "§aAI 响应完成" : "§cAI 返回错误");
 			return;
 		}
@@ -647,13 +686,17 @@ public class WorldForgeStudioScreen extends Screen {
 
 		String snapWarn = snapshotOk ? "" : " §c(快照解析失败，请点刷新)";
 		switch (kind) {
-			case "agent_chat" -> aiPanel.onChatAccepted(r.ok(), r.message());
+			case "agent_chat" -> {
+				aiPanel.onChatAccepted(r.ok(), r.message());
+				applyMode();
+			}
 			case "agent_confirm" -> {
 				if (!r.snapshot().isEmpty()) {
 					ClientStudioState.applySnapshot(r.snapshot());
 					rows = ClientStudioState.list();
 				}
 				aiPanel.onConfirmResult(r.ok(), r.message());
+				applyMode();
 				if (r.ok() && r.data() != null && r.data().contains("itemId")) {
 					try {
 						var env = com.google.gson.JsonParser.parseString(r.data()).getAsJsonObject();
@@ -666,7 +709,10 @@ public class WorldForgeStudioScreen extends Screen {
 					}
 				}
 			}
-			case "agent_cancel" -> aiPanel.onCancelResult();
+			case "agent_cancel" -> {
+				aiPanel.onCancelResult();
+				applyMode();
+			}
 			case "list" -> setStatus((snapshotOk
 					? "§a已同步服务端列表 · " + rows.size() + " 个物品"
 							+ (ClientStudioState.tombstones().isEmpty() ? "" : " · §c" + ClientStudioState.tombstones().size() + " 个失效标记")
@@ -683,6 +729,8 @@ public class WorldForgeStudioScreen extends Screen {
 			}
 			case "update" -> {
 				dirty = false;
+				discardArmed = false;
+				closeArmed = false;
 				setStatus("§a保存成功；背包中的存量物品已即时应用新属性" + syncNote(r.phase()));
 			}
 			case "delete" -> {
@@ -722,13 +770,30 @@ public class WorldForgeStudioScreen extends Screen {
 
 	// ---------- rendering ----------
 
+	/** v0.3.1 P0: background-blur gate - exactly ONE blur pass per frame. */
+	private boolean blurDoneThisFrame = false;
+
+	@Override
+	public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) {
+		// Screen.render() calls renderBackground() again internally. Without
+		// this gate the second applyBlur() re-blurs the WHOLE framebuffer -
+		// including the WorldForge panel and text we already painted - which
+		// is precisely the "custom content blurry, vanilla widgets sharp"
+		// symptom. One blur per frame; everything we draw afterwards is crisp.
+		if (blurDoneThisFrame) {
+			return;
+		}
+		super.renderBackground(ctx, mouseX, mouseY, delta);
+		blurDoneThisFrame = true;
+	}
+
 	@Override
 	public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
+		blurDoneThisFrame = false;
+		// 1) vanilla background: blur the game world once, then darken
 		renderBackground(ctx, mouseX, mouseY, delta);
 
-		// v0.3.0 fix: the panel backdrop and static layers must be painted
-		// BEFORE super.render(), which draws the widget tree on top. The old
-		// order (widgets first, then an opaque fill) covered every button.
+		// 2) WorldForge panel + all custom content paint AFTER the blur
 		ctx.fill(x0, y0, x0 + panelW, y0 + panelH, 0xC8101014);
 		ctx.drawBorder(x0, y0, panelW, panelH, 0x90FFFFFF);
 		ctx.drawTextWithShadow(textRenderer, Text.literal("§b§lWorldForge Studio"), x0 + 8, y0 + 8, 0xFFFFFF);
@@ -764,7 +829,8 @@ public class WorldForgeStudioScreen extends Screen {
 		ctx.fill(x0, y0 + panelH - 14, x0 + panelW, y0 + panelH, 0xFF0A0A12);
 		ctx.drawTextWithShadow(textRenderer, clip(statusLine, panelW - 16), x0 + 6, y0 + panelH - 11, 0xFFFFFF);
 
-		// widgets (buttons/fields) render on top of the panel backdrop
+		// 3) widget tree above the panel; the renderBackground() inside
+		// super.render() is suppressed by the gate, so nothing re-blurs
 		super.render(ctx, mouseX, mouseY, delta);
 
 		// modal overlays draw above widgets
@@ -933,14 +999,6 @@ public class WorldForgeStudioScreen extends Screen {
 
 	private static boolean inZone(int[] z, double mx, double my) {
 		return mx >= z[0] && mx <= z[2] && my >= z[1] && my <= z[3];
-	}
-
-	@Override
-	public boolean charTyped(char chr, int modifiers) {
-		if (mode == Mode.AI && aiPanel.charTyped(chr, modifiers)) {
-			return true;
-		}
-		return super.charTyped(chr, modifiers);
 	}
 
 	@Override
