@@ -1,5 +1,15 @@
 # 更新日志
 
+## v0.3.0 — AI AgentBridge：游戏内自然语言创造物品
+
+- **前置修复（上轮审查的 6 个 GUI 缺陷，最小补丁）**：面板背景绘制顺序遮盖控件；保存时误自动附加闪电技能；程序化 setText 误标脏；关闭按钮绕过草稿守卫；服务端截断快照产生非法 JSON（改为超限省略+提示刷新）；客户端快照解析失败仍报同步成功（现在显式报错）。回归 25/25 绿。
+- **AgentBridge**：`ai/` 模块（AgentConfig/OpenAICompatibleProvider(JDK HttpClient 异步+超时+重试+并发上限)/MockModelProvider/ProposalJson 严格解析/ProposalValidator 白名单校验/ProposalDiff 预览/AgentSession 会话隔离/AgentBridge 两阶段提案-确认）。API Key 仅存服务端 config，日志掩码，不进存档/客户端。
+- **协议**：agent_chat/agent_confirm/agent_cancel kinds + requestId=0 异步 agent 事件通道 + 响应 data 通道（confirm 携带 itemId 直达编辑视图一键获取）。
+- **GUI**：Studio 新增「✦ AI 创造面板」：对话历史、思考状态+75s 看门狗、提案预览（差异展示）、确认/取消、Enter 发送；无 Key 时明确提示不崩溃。
+- **安全**：模型输出仅是提案（阶段 A 零副作用）；确认时复核 OP2、TTL、base 版本冲突、proposalId 幂等；每回合 1 提案 + 每分钟频率上限；提示词注入无法越权（白名单在服务端）。
+- **测试**：JUnit +12（ProposalJsonTest）；GameTest 25→**26**（新增 AI 端到端验收链单测：禁用指引/限流/创建-预览-确认-落盘-幂等/取消零副作用/不支持技能报告/垃圾输出/网络故障/差量修改/冲突拒绝/会话隔离/重载持久/非 OP 拒绝）。测试中发现并修复真实缺陷：validator 对 update 误要求 max_durability 必填。
+- 已知限制：真实模型端到端需用户自备 key 验证（自动化全部基于 Mock，不谎报真实模型结果）；K 键 GUI 像素级目测仍待人工。
+
 ## v0.2.0 — WorldForge Studio 游戏内可视化编辑器
 
 - **阶段1（数据安全遗留）**：`tryLoadStrict()` 严格重载——局部损坏（单条坏记录/缺 items 字段/新版本号/重复 ID/字段类型错误）一律拒绝整体替换并保留运行时状态与原始文件；首次启动改为「严格优先 → 失败时容错抢救 + 隔离备份 + 逐条大声告警」。回归 R11 在 v0.1.2 上先行实测 FAILED（`got count 1` 假成功），取证 `docs/evidence-r11-failed-on-v0.1.2.log`。

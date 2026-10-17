@@ -1,4 +1,4 @@
-# WorldForge — Minecraft 运行时动态物品引擎 + 游戏内可视化编辑器 (v0.2.0)
+# WorldForge — Minecraft 运行时动态物品引擎 + 游戏内可视化编辑器 + AI AgentBridge (v0.3.0)
 
 [![build](https://img.shields.io/badge/build-passing-brightgreen)]() [![MC](https://img.shields.io/badge/Minecraft-1.21.1-green)]() [![Loader](https://img.shields.io/badge/Fabric-Loader%200.16.9-blue)]()
 
@@ -11,6 +11,32 @@ WorldForge 的目标是成为 Minecraft 游戏内的 AI Mod 开发环境：玩�
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**（distributionUrl 已指向腾讯镜像，可改回 services.gradle.org）
 
 ---
+
+## 一·四、v0.3.0 — AI AgentBridge：自然语言创造物品
+
+**配置（服务器端一次性）**：编辑 `config/worldforge/agent.json`（首次启动自动生成模板）：
+
+```json
+{
+  "enabled": true,
+  "baseUrl": "https://api.deepseek.com/v1",
+  "model": "deepseek-chat",
+  "apiKey": "粘贴你的 KEY"
+}
+```
+
+支持任何 OpenAI 兼容接口（OpenAI / DeepSeek / 本地网关…）。API Key 只存服务端配置文件：不进世界存档、不发给客户端、日志自动掩码。未配置时 AI 面板显示启用指引，可视化编辑器不受影响。
+
+**使用流程**：
+
+1. 按 K 打开 Studio → 点「✦ AI 创造面板」。
+2. 输入：`创建雷霆之剑，攻击力 12，右键召唤闪电，冷却 5 秒。`
+3. AI 返回**结构化提案预览**（名称/ID/外观/伤害/耐久/技能/冷却 + 变更差异），此时世界数据未发生任何变化。
+4. 点「确认应用」→ 服务端复核 OP2 权限与参数 → 经 WorldForgeTools 统一管线创建并落盘；点「取消」则零副作用。
+5. 确认后自动跳到该物品的编辑视图 → 「获取测试」→ ESC 关闭直接玩。
+6. 继续对话：`把伤害改成 20，冷却改成 2 秒。` → AI 识别现有物品做**差量修改**（未提及的属性/技能保持不变），退出重进后定义仍然恢复。
+
+**安全边界**：模型只能产出白名单内的提案（触发器/动作/数值范围/原版贴图目录）；不支持的能力（如飞行）会如实报告限制而不是假装成功；提案过期、被他人抢先修改（冲突检测）、重复提交（幂等）都有明确处理。架构与威胁模型详见 [docs/AGENTBRIDGE.md](docs/AGENTBRIDGE.md)。
 
 ## 一·五、v0.2.0 — WorldForge Studio 游戏内可视化编辑器
 
@@ -250,7 +276,7 @@ src/main/resources/
 git clone https://github.com/MUERJUN/WorldForge
 cd WorldForge
 ./gradlew build          # 编译 + JUnit
-./gradlew runGameTest    # 真实服务端验收测试（25 项：A-H + R1-R12 + S1-S4）
+./gradlew runGameTest    # 真实服务端验收测试（26 项：A-H + R1-R12 + S1-S4 + AI 端到端链）
 ./gradlew runClient      # 进游戏手测：/wf demo → /wf give …
 ```
 
