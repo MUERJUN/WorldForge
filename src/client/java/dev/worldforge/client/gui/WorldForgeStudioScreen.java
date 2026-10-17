@@ -6,6 +6,7 @@ import dev.worldforge.definition.BehaviorDefinition;
 import dev.worldforge.definition.ItemDefinition;
 import dev.worldforge.definition.TextureSource;
 import dev.worldforge.network.WorldForgeStudioProtocol;
+import dev.worldforge.studio.StudioUiState;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
@@ -33,7 +34,7 @@ import java.util.Map;
  * agent shares exactly this surface. The list content comes from server
  * snapshots (definitions + tombstones), never hard-coded data.</p>
  *
- * <p>Drafts are local until 保存 (no per-keystroke writes); a dirty marker
+ * <p>Drafts are local until 保存 (no per-keystroke writes); a ui.dirty() marker
  * warns before navigation; responses echo requestId so stale replies are
  * dropped; submits are locked while one request is in flight and a 5s
  * timeout releases the UI with a "refresh, don't blind-retry" hint.</p>
@@ -42,9 +43,16 @@ public class WorldForgeStudioScreen extends Screen {
 
 	public enum Mode { LIST, EDIT, CREATE, APPEAR_PICK, DELETE_CONFIRM, AI }
 
+	/**
+	 * v0.3.2: the AUTHORITATIVE UI state machine. Every navigation, draft
+	 * guard, AI phase transition and widget-visibility decision goes through
+	 * it, so the rules are unit-tested instead of living in widget callbacks.
+	 * {@link #mode} below is only a render cache synchronised from it.
+	 */
+	private final StudioUiState ui = new StudioUiState();
+
 	private Mode mode = Mode.LIST;
 	private String selectedId = null; // edit target (server id), null in CREATE
-	private boolean dirty = false;
 	private boolean editorWasEditing = false; // remember EDIT vs CREATE for picker/confirm back-nav
 
 	private TextFieldWidget idField, nameField, descField, damageField, durabilityField, cooldownField, param1, param2;
@@ -97,7 +105,7 @@ public class WorldForgeStudioScreen extends Screen {
 		damageField = field(rx, fy, half, "伤害");
 		durabilityField = field(rx + half + 6, fy, half, "耐久(≥1)");
 		fy += 20;
-		appearanceButton = button(rx, fy, rw, 18, "外观: -", b -> setMode(Mode.APPEAR_PICK));
+		appearanceButton = button(rx, fy, rw, 18, "外观: -", b -> openModal(Mode.APPEAR_PICK));
 		fy += 20;
 		triggerButton = button(rx, fy, half, 18, "触发: right_click", b -> cycleTrigger());
 		actionButton = button(rx + half + 6, fy, half, 18, "动作: -", b -> cycleAction());
@@ -110,7 +118,7 @@ public class WorldForgeStudioScreen extends Screen {
 		saveButton = button(rx, fy, bw, 20, "保存", b -> submitSave());
 		addButton = button(rx + bw + 8, fy, bw, 20, "＋加入行为", b -> appendDraftBehavior());
 		giveButton = button(rx + 2 * (bw + 8), fy, bw, 20, "获取测试", b -> submitGive());
-		deleteButton = button(rx + 3 * (bw + 8), fy, bw, 20, "删除", b -> setMode(Mode.DELETE_CONFIRM));
+		deleteButton = button(rx + 3 * (bw + 8), fy, bw, 20, "删除", b -> openModal(Mode.DELETE_CONFIRM));
 		fy += 22;
 		backButton = button(rx, fy, rw, 16, "« 返回列表", b -> tryLeaveEditor());
 
@@ -119,12 +127,30 @@ public class WorldForgeStudioScreen extends Screen {
 		button(x0 + 8, y0 + panelH - 26, lw / 2 - 2, 16, "刷新", b -> sendRequest("list", ""));
 		button(x0 + 8 + lw / 2 + 2, y0 + panelH - 26, lw / 2 - 2, 16, "关闭 (ESC)", b -> guardedClose());
 
-		aiPanel = new AiStudioPanel();
-		aiPanel.init(x0 + 176, y0 + 24, panelW - 192, panelH - 56,
-				text -> sendRequest("agent_chat", jsonOf("message", text)),
-				() -> sendRequest("agent_confirm", jsonOf("proposalId", aiPanel.pendingProposalId())),
-				() -> sendRequest("agent_cancel", jsonOf("proposalId", aiPanel.pendingProposalId())),
-				() -> sendRequest("list", ""));
+		aiPanel = new AiStudioPanel(ui, new AiStudioPanel.Bridge() {
+			@Override
+			public boolean sendChat(String text) {
+				return sendRequest("agent_chat", jsonOf("message", text));
+			}
+
+			@Override
+			public void sendCancel(String proposalId) {
+				// best-effort only: the GUI already cancelled locally, so an
+				// unreachable server must never block the player.
+				sendRequestBestEffort("agent_cancel", jsonOf("proposalId", proposalId));
+			}
+
+			@Override
+			public void sendConfirm(String proposalId) {
+				sendRequest("agent_confirm", jsonOf("proposalId", proposalId));
+			}
+
+			@Override
+			public void refreshList() {
+				sendRequest("list", "");
+			}
+		});
+		aiPanel.init(x0 + 176, y0 + 24, panelW - 192, panelH - 56);
 		for (var b : aiPanel.buttons()) {
 			addDrawableChild(b);
 		}
@@ -142,14 +168,14 @@ public class WorldForgeStudioScreen extends Screen {
 		f.setPlaceholder(Text.literal(ph));
 		f.setChangedListener(str -> {
 			if (!programmatic) {
-				dirty = true; // v0.3.0 fix: our own setText() used to mark drafts dirty
+				ui.markDirty(); // v0.3.0 fix: our own setText() used to mark drafts ui.dirty()
 			}
 		});
 		addDrawableChild(f);
 		return f;
 	}
 
-	/** populate fields without tripping the dirty flag */
+	/** populate fields without tripping the ui.dirty() flag */
 	private void fillFields(Runnable r) {
 		programmatic = true;
 		try {
@@ -165,15 +191,54 @@ public class WorldForgeStudioScreen extends Screen {
 		return b;
 	}
 
-	// ---------- mode navigation ----------
+	// ---------- mode navigation (all decisions live in StudioUiState) ----------
 
-	private void setMode(Mode m) {
-		mode = m;
+	/** mirror the authoritative state machine into the render cache */
+	private void syncMode() {
+		mode = Mode.valueOf(ui.mode().name());
+		editorWasEditing = ui.editorWasEditing();
+	}
+
+	private boolean dirty() {
+		return ui.dirty();
+	}
+
+	/** open a modal from the editor through the state machine */
+	private void openModal(Mode m) {
+		syncMode();
+		ui.openModal(StudioUiState.Mode.valueOf(m.name()));
+		syncMode();
 		applyMode();
 	}
 
+	private void closeModal() {
+		ui.closeModal();
+		syncMode();
+		applyMode();
+	}
+
+	/**
+	 * Navigate through the draft guard. Returns true when the navigation
+	 * happened; when it returns false the guard has armed itself and the
+	 * caller has already shown the warning.
+	 */
+	private boolean navigate(Mode target, String warnMessage) {
+		syncMode();
+		var nav = ui.requestNavigation(StudioUiState.Mode.valueOf(target.name()));
+		if (nav == StudioUiState.Nav.NEEDS_CONFIRM) {
+			setStatus(warnMessage);
+			applyMode();
+			return false;
+		}
+		syncMode();
+		applyMode();
+		return nav == StudioUiState.Nav.MOVED;
+	}
+
 	private void applyMode() {
-		if (mode == Mode.AI) {
+		// v0.3.2: widget visibility is derived from the state machine so that
+		// drawing and interaction can never disagree.
+		if (ui.aiVisible()) {
 			for (TextFieldWidget f : new TextFieldWidget[]{idField, nameField, descField, damageField,
 					durabilityField, param1, param2, cooldownField}) {
 				f.visible = false;
@@ -182,11 +247,22 @@ public class WorldForgeStudioScreen extends Screen {
 					saveButton, addButton, giveButton, deleteButton, backButton}) {
 				b.visible = false;
 			}
-			aiPanel.applyVisibility(true);
+			aiPanel.input().visible = ui.inputVisible();
+			aiPanel.input().active = ui.inputVisible();
+			var bs = aiPanel.buttons();
+			bs.get(0).visible = ui.sendVisible();
+			bs.get(0).active = ui.sendActive();
+			bs.get(1).visible = ui.confirmVisible();
+			bs.get(1).active = ui.confirmVisible();
+			bs.get(2).visible = ui.cancelVisible();
+			bs.get(2).active = ui.cancelVisible();
 			return;
 		}
-		aiPanel.applyVisibility(false);
-		boolean editor = mode == Mode.EDIT || mode == Mode.CREATE;
+		aiPanel.input().visible = ui.inputVisible();
+		for (var b : aiPanel.buttons()) {
+			b.visible = false;
+		}
+		boolean editor = ui.editorFieldsVisible();
 		idField.visible = mode == Mode.CREATE; // id immutable once created (spec 5.1)
 		idField.active = mode == Mode.CREATE;
 		for (TextFieldWidget f : new TextFieldWidget[]{nameField, descField, damageField, durabilityField, param1, param2, cooldownField}) {
@@ -208,11 +284,7 @@ public class WorldForgeStudioScreen extends Screen {
 	}
 
 	private void enterCreate() {
-		discardArmed = false;
-		closeArmed = false;
 		selectedId = null;
-		editorWasEditing = false;
-		dirty = false;
 		draftBehaviors.clear();
 		draftTexture = AppearanceSlots.DEFAULT_TEXTURE;
 		draftTrigger = "right_click";
@@ -228,20 +300,18 @@ public class WorldForgeStudioScreen extends Screen {
 			param2.setText("");
 		});
 		refreshDraftWidgets();
-		setMode(Mode.CREATE);
+		ui.beginCreate();
+		syncMode();
+		applyMode();
 		setStatus("§7填写后点「保存」创建；ID 创建后不可修改");
 	}
 
 	private void enterEdit(ItemDefinition d) {
-		if (dirty && (mode == Mode.EDIT || mode == Mode.CREATE)) {
+		if (ui.dirty() && ui.editorVisible()) {
 			setStatus("§e当前草稿未保存：先「保存」或点「返回列表」两次放弃");
 			return;
 		}
 		selectedId = d.id();
-		editorWasEditing = true;
-		dirty = false;
-		discardArmed = false;
-		closeArmed = false;
 		draftTexture = d.texture() == null ? AppearanceSlots.DEFAULT_TEXTURE : d.texture().resource();
 		draftBehaviors.clear();
 		draftBehaviors.addAll(d.behaviors());
@@ -268,7 +338,9 @@ public class WorldForgeStudioScreen extends Screen {
 			}
 		});
 		refreshDraftWidgets();
-		setMode(Mode.EDIT);
+		ui.beginEdit();
+		syncMode();
+		applyMode();
 	}
 
 	private void setSelectedField(TextFieldWidget f) {
@@ -277,17 +349,14 @@ public class WorldForgeStudioScreen extends Screen {
 		}
 	}
 
-	private boolean closeArmed = false;
-
-	/** v0.3.0 fix: closing with unsaved edits warns first (double-press to confirm). */
+	/**
+	 * Close the editor. Always ends in a close: with unsaved edits the first
+	 * press arms the guard and the second closes, so there is NO state in
+	 * which the player cannot exit (the reported "cannot close" bug).
+	 */
 	private void guardedClose() {
-		discardArmed = false;
-		if ((mode == Mode.EDIT || mode == Mode.CREATE) && dirty) {
-			if (closeArmed) {
-				close();
-				return;
-			}
-			closeArmed = true;
+		var outcome = ui.requestClose();
+		if (outcome == StudioUiState.Esc.NEEDS_CONFIRM) {
 			setStatus("§e存在未保存修改：再点「关闭」将放弃草稿并退出编辑器");
 			return;
 		}
@@ -295,8 +364,10 @@ public class WorldForgeStudioScreen extends Screen {
 	}
 
 	private void enterAi() {
-		setMode(Mode.AI);
-		setSelectedField(aiPanel.inputWidget()); // focus the chat input once, on entry
+		if (!navigate(Mode.AI, "§e存在未保存修改：再点「AI 创造面板」将放弃草稿")) {
+			return;
+		}
+		setSelectedField(aiPanel.input());
 	}
 
 	/**
@@ -308,60 +379,49 @@ public class WorldForgeStudioScreen extends Screen {
 	 * state is now an explicit flag, reset on every entry and every other
 	 * action, and never derived from display text.
 	 */
-	private boolean discardArmed = false;
-
+	/**
+	 * v0.3.2: "back to list" goes through the same guard as every other
+	 * navigation entry point. The armed state is an explicit flag inside the
+	 * state machine - never inferred from status-bar text, which is what used
+	 * to trap the player in the editor.
+	 */
 	private void tryLeaveEditor() {
-		closeArmed = false;
-		if (dirty) {
-			if (discardArmed) {
-				discardArmed = false;
-				dirty = false;
-				setMode(Mode.LIST);
-				sendRequest("list", "");
-				return;
-			}
-			discardArmed = true;
-			setStatus("§e存在未保存修改：再点「返回」将放弃草稿");
-			return;
+		if (navigate(Mode.LIST, "§e存在未保存修改：再点「返回列表」将放弃草稿")) {
+			sendRequest("list", "");
 		}
-		discardArmed = false;
-		setMode(Mode.LIST);
 	}
 
 	@Override
 	public boolean shouldCloseOnEsc() {
-		return mode == Mode.LIST; // overlays/editor handle ESC themselves
+		// the state machine already resolved this ESC into CLOSE; modals and
+		// the editor never reach here (they handle ESC themselves)
+		return ui.mode() == StudioUiState.Mode.LIST;
 	}
 
 	@Override
 	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-		if (mode == Mode.AI && (keyCode == 257 || keyCode == 335) && aiPanel.trySendOnEnter()) {
+		if (ui.aiVisible() && (keyCode == 257 || keyCode == 335) && aiPanel.onEnter()) {
 			return true; // ENTER sends in the AI panel
 		}
 		if (keyCode == 256) { // GLFW_ESCAPE
-			switch (mode) {
-				case APPEAR_PICK, DELETE_CONFIRM -> {
-					setMode(editorWasEditing ? Mode.EDIT : Mode.CREATE);
+			switch (ui.pressEsc()) {
+				case CANCEL_PROPOSAL -> {
+					aiPanel.add("§7(已取消提案，世界数据未发生任何变化)");
+					setStatus("§7已取消 AI 提案；再按 ESC 返回列表");
+					applyMode();
 					return true;
 				}
-				case EDIT, CREATE -> {
-					tryLeaveEditor();
+				case NEEDS_CONFIRM -> {
+					setStatus("§e存在未保存修改：再按 ESC 将放弃草稿");
 					return true;
 				}
-				case AI -> {
-					// v0.3.1: ESC is layered so it can never trap the player:
-					// with a pending proposal -> cancel that proposal only
-					// (server clears PENDING, world untouched);
-					// otherwise -> back to LIST; from LIST -> closes the screen.
-					if (aiPanel.hasPending()) {
-						sendRequest("agent_cancel", jsonOf("proposalId", aiPanel.pendingProposalId()));
-						return true;
-					}
-					setMode(Mode.LIST);
+				case MOVED -> {
+					syncMode();
+					applyMode();
 					return true;
 				}
-				default -> {
-					return super.keyPressed(keyCode, scanCode, modifiers); // LIST: closes screen
+				case CLOSE -> {
+					return super.keyPressed(keyCode, scanCode, modifiers);
 				}
 			}
 		}
@@ -381,7 +441,7 @@ public class WorldForgeStudioScreen extends Screen {
 
 	private void cycleTrigger() {
 		draftTrigger = draftTrigger.equals("right_click") ? "hit_entity" : "right_click";
-		dirty = true;
+		ui.markDirty();
 		refreshDraftWidgets();
 	}
 
@@ -391,7 +451,7 @@ public class WorldForgeStudioScreen extends Screen {
 	private void cycleAction() {
 		int i = Math.max(0, ACTIONS.indexOf(draftAction));
 		draftAction = ACTIONS.get((i + 1) % ACTIONS.size());
-		dirty = true;
+		ui.markDirty();
 		refreshDraftWidgets();
 	}
 
@@ -507,7 +567,7 @@ public class WorldForgeStudioScreen extends Screen {
 		}
 		draftBehaviors.removeIf(x -> x.trigger().equals(b.trigger()) && x.actions().equals(b.actions()));
 		draftBehaviors.add(b);
-		dirty = true;
+		ui.markDirty();
 		fillFields(() -> {
 			param1.setText("");
 			param2.setText("");
@@ -613,22 +673,34 @@ public class WorldForgeStudioScreen extends Screen {
 
 	// ---------- network ----------
 
-	private void sendRequest(String kind, String payload) {
+	/**
+	 * Send one studio request.
+	 *
+	 * @return true only when the packet was actually handed to the transport,
+	 *         so callers (the AI panel in particular) never enter a loading
+	 *         state for a request that was never sent.
+	 */
+	private boolean sendRequest(String kind, String payload) {
 		if (!ClientPlayNetworking.canSend(WorldForgeStudioProtocol.StudioRequest.ID)) {
 			setStatus("§c当前服务端没有安装 WorldForge - 编辑不可用（只读）");
-			return;
+			return false;
 		}
 		if (inFlightReqId != 0) {
-			if (kind.startsWith("agent_")) {
-				setStatus("§e上一个请求尚未返回（5 秒内自动解除，可稍后点刷新）");
-			}
-			return;
+			setStatus("§e上一个请求尚未返回（5 秒内自动解除，可稍后点刷新）");
+			return false;
 		}
 		int rid = nextReqId++;
 		inFlightReqId = rid;
 		inFlightKind = kind;
 		inFlightSince = System.currentTimeMillis();
-		ClientPlayNetworking.send(new WorldForgeStudioProtocol.StudioRequest(kind, rid, payload));
+		try {
+			ClientPlayNetworking.send(new WorldForgeStudioProtocol.StudioRequest(kind, rid, payload));
+		} catch (Exception e) {
+			inFlightReqId = 0;
+			inFlightKind = "";
+			setStatus("§c请求发送失败：" + e.getClass().getSimpleName());
+			return false;
+		}
 		setStatus(switch (kind) {
 			case "agent_chat" -> "§d已发送给 AI，等待模型响应…";
 			case "agent_confirm" -> "§7确认提案中…";
@@ -641,6 +713,23 @@ public class WorldForgeStudioScreen extends Screen {
 			default -> "§7处理中…";
 		});
 		applyMode();
+		return true;
+	}
+
+	/**
+	 * v0.3.2: best-effort notification that must never block the GUI. Used for
+	 * cancelling an AI proposal, which is already resolved locally; a dead or
+	 * busy connection simply means the server keeps the proposal until its TTL.
+	 */
+	private void sendRequestBestEffort(String kind, String payload) {
+		if (!ClientPlayNetworking.canSend(WorldForgeStudioProtocol.StudioRequest.ID)) {
+			return;
+		}
+		try {
+			ClientPlayNetworking.send(new WorldForgeStudioProtocol.StudioRequest(kind, nextReqId++, payload));
+		} catch (Exception ignored) {
+			// local state is already consistent; nothing to recover
+		}
 	}
 
 	/** called on the client thread from the S2C receiver */
@@ -671,7 +760,7 @@ public class WorldForgeStudioScreen extends Screen {
 				default -> "§c失败[" + r.phase() + "]：" + r.message();
 			});
 			if (!kind.equals("list")) {
-				dirty = true; // keep the draft so the player can fix and retry
+				ui.markDirty(); // keep the draft so the player can fix and retry
 			}
 			applyMode();
 			return;
@@ -696,6 +785,7 @@ public class WorldForgeStudioScreen extends Screen {
 					rows = ClientStudioState.list();
 				}
 				aiPanel.onConfirmResult(r.ok(), r.message());
+				syncMode();
 				applyMode();
 				if (r.ok() && r.data() != null && r.data().contains("itemId")) {
 					try {
@@ -710,7 +800,7 @@ public class WorldForgeStudioScreen extends Screen {
 				}
 			}
 			case "agent_cancel" -> {
-				aiPanel.onCancelResult();
+				// the GUI already cancelled locally; this is only the server ack
 				applyMode();
 			}
 			case "list" -> setStatus((snapshotOk
@@ -718,25 +808,25 @@ public class WorldForgeStudioScreen extends Screen {
 							+ (ClientStudioState.tombstones().isEmpty() ? "" : " · §c" + ClientStudioState.tombstones().size() + " 个失效标记")
 					: "§c列表快照无效 - 请点刷新重试") + snapWarn);
 			case "create" -> {
-				dirty = false;
+				ui.markSaved();
 				String newId = idField.getText().trim();
 				if (ClientStudioState.get(newId) != null) {
 					selectedId = newId;
-					editorWasEditing = true;
-					setMode(Mode.EDIT);
+					ui.beginEdit();
+					syncMode();
+					applyMode();
 				}
 				setStatus("§a创建成功并已保存到当前世界" + syncNote(r.phase()));
 			}
 			case "update" -> {
-				dirty = false;
-				discardArmed = false;
-				closeArmed = false;
+				ui.markSaved();
 				setStatus("§a保存成功；背包中的存量物品已即时应用新属性" + syncNote(r.phase()));
 			}
 			case "delete" -> {
-				dirty = false;
+				ui.markSaved();
 				selectedId = null;
-				setMode(Mode.LIST);
+				ui.requestNavigation(StudioUiState.Mode.LIST);
+				syncMode();
 				setStatus("§a定义已删除；存量物品进入失效标记（未销毁），重建同名 ID 可恢复" + syncNote(r.phase()));
 			}
 			case "give" -> setStatus("§a" + r.message() + " - 按 ESC 关闭编辑器即可使用");
@@ -760,266 +850,23 @@ public class WorldForgeStudioScreen extends Screen {
 		if (aiPanel != null) {
 			aiPanel.tick();
 		}
+		// v0.3.2: self-healing against a dead/unreachable server. If we are
+		// waiting on the model but the studio channel is gone, release the AI
+		// state so the player is never stuck in "思考中" (request state fix #1).
+		if (ui.aiPhase() == StudioUiState.AiPhase.THINKING
+				&& !ClientPlayNetworking.canSend(WorldForgeStudioProtocol.StudioRequest.ID)) {
+			ui.onDisconnected();
+			setStatus("§e与服务端的连接已断开，AI 请求已取消（编辑器仍可使用）");
+			applyMode();
+		}
+		// 5s request guard is released without ever touching local AI state
 		if (inFlightReqId != 0 && System.currentTimeMillis() - inFlightSince > 5000) {
 			inFlightReqId = 0;
 			inFlightKind = "";
-			setStatus("§e请求超时未响应 - 点「刷新」核对状态；已保存成功的内容请勿重复提交");
+			setStatus("§e请求超时未响应 - 点「刷新」核对状态；已提交的修改请勿重复提交");
 			applyMode();
 		}
 	}
-
-	// ---------- rendering ----------
-
-	/** v0.3.1 P0: background-blur gate - exactly ONE blur pass per frame. */
-	private boolean blurDoneThisFrame = false;
-
-	@Override
-	public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) {
-		// Screen.render() calls renderBackground() again internally. Without
-		// this gate the second applyBlur() re-blurs the WHOLE framebuffer -
-		// including the WorldForge panel and text we already painted - which
-		// is precisely the "custom content blurry, vanilla widgets sharp"
-		// symptom. One blur per frame; everything we draw afterwards is crisp.
-		if (blurDoneThisFrame) {
-			return;
-		}
-		super.renderBackground(ctx, mouseX, mouseY, delta);
-		blurDoneThisFrame = true;
-	}
-
-	@Override
-	public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-		blurDoneThisFrame = false;
-		// 1) vanilla background: blur the game world once, then darken
-		renderBackground(ctx, mouseX, mouseY, delta);
-
-		// 2) WorldForge panel + all custom content paint AFTER the blur
-		ctx.fill(x0, y0, x0 + panelW, y0 + panelH, 0xC8101014);
-		ctx.drawBorder(x0, y0, panelW, panelH, 0x90FFFFFF);
-		ctx.drawTextWithShadow(textRenderer, Text.literal("§b§lWorldForge Studio"), x0 + 8, y0 + 8, 0xFFFFFF);
-		ctx.drawTextWithShadow(textRenderer,
-				client.getServer() != null ? "§7当前世界（单人）" : "§7当前服务器（多人）",
-				x0 + panelW - 120, y0 + 9, 0x808080);
-
-		renderListColumn(ctx, mouseX, mouseY);
-
-		if (mode == Mode.AI) {
-			aiPanel.render(ctx, x0 + 176, y0 + 24, panelW - 192, panelH - 56, mouseX, mouseY);
-		}
-
-		if (dirty && (mode == Mode.EDIT || mode == Mode.CREATE)) {
-			ctx.drawTextWithShadow(textRenderer, "§e● 未保存的修改", x0 + panelW - 100, y0 + 18, 0xFFFF55);
-		}
-
-		if (mode == Mode.LIST) {
-			int rx = x0 + 176;
-			ctx.drawTextWithShadow(textRenderer, "§7点击左侧物品进行编辑", rx, y0 + 32, 0xAAAAAA);
-			ctx.drawTextWithShadow(textRenderer, "§7或「＋ 创建物品」新建", rx, y0 + 44, 0xAAAAAA);
-			ctx.drawTextWithShadow(textRenderer, "§8所有修改经服务端校验后保存到当前世界存档", rx, y0 + 68, 0x808080);
-			ctx.drawTextWithShadow(textRenderer, "§8退出重进后定义与物品自动恢复", rx, y0 + 80, 0x808080);
-			if (!ClientStudioState.serverReady()) {
-				ctx.drawTextWithShadow(textRenderer, "§e等待服务端 WorldForge 数据…（若服务器未装 Mod 则只读）", rx, y0 + 108, 0xFFAA00);
-			}
-			if (!ClientStudioState.tombstones().isEmpty()) {
-				ctx.drawTextWithShadow(textRenderer, "§c失效定义：" + String.join(", ", ClientStudioState.tombstones()),
-						x0 + 176, y0 + panelH - 60, 0xFF6060);
-			}
-		}
-
-		ctx.fill(x0, y0 + panelH - 14, x0 + panelW, y0 + panelH, 0xFF0A0A12);
-		ctx.drawTextWithShadow(textRenderer, clip(statusLine, panelW - 16), x0 + 6, y0 + panelH - 11, 0xFFFFFF);
-
-		// 3) widget tree above the panel; the renderBackground() inside
-		// super.render() is suppressed by the gate, so nothing re-blurs
-		super.render(ctx, mouseX, mouseY, delta);
-
-		// modal overlays draw above widgets
-		if (mode == Mode.APPEAR_PICK) {
-			renderPickerOverlay(ctx, mouseX, mouseY);
-		} else if (mode == Mode.DELETE_CONFIRM) {
-			renderDeleteConfirmOverlay(ctx);
-		}
-	}
-
-	private void renderPickerOverlay(DrawContext ctx, int mouseX, int mouseY) {
-		int ox = x0 + 160, oy = y0 + 16, ow = panelW - 168, oh = panelH - 40;
-		ctx.fill(ox, oy, ox + ow, oy + oh, 0xF014141C);
-		renderPickerContent(ctx, mouseX, mouseY);
-	}
-
-	private void renderDeleteConfirmOverlay(DrawContext ctx) {
-		int ox = x0 + 90, oy = y0 + 60, ow = panelW - 180, oh = 130;
-		ctx.fill(ox, oy, ox + ow, oy + oh, 0xF414141C);
-		renderDeleteConfirmContent(ctx);
-	}
-
-	private void renderListColumn(DrawContext ctx, int mouseX, int mouseY) {
-		int lx = x0 + 8, ly = y0 + 26, lw = 160, rowH = 22;
-		int maxRows = Math.max(1, (panelH - 100) / rowH);
-		ctx.fill(lx - 2, ly - 2, lx + lw + 2, ly + maxRows * rowH + 2, 0x60000000);
-		if (rows.isEmpty()) {
-			ctx.drawTextWithShadow(textRenderer, "§7（当前世界还没有物品定义）", lx + 4, ly + 6, 0x909090);
-		}
-		for (int i = 0; i < maxRows; i++) {
-			int idx = listScroll + i;
-			if (idx >= rows.size()) {
-				break;
-			}
-			ItemDefinition d = rows.get(idx);
-			int ry = ly + i * rowH;
-			boolean hov = mouseX >= lx && mouseX <= lx + lw && mouseY >= ry && mouseY < ry + rowH;
-			boolean sel = d.id().equals(selectedId);
-			if (sel) {
-				ctx.fill(lx, ry, lx + lw, ry + rowH, 0x603060C0);
-			} else if (hov) {
-				ctx.fill(lx, ry, lx + lw, ry + rowH, 0x30FFFFFF);
-			}
-			drawIcon(ctx, d.texture() == null ? AppearanceSlots.DEFAULT_TEXTURE : d.texture().resource(), lx + 3, ry + 3);
-			ctx.drawTextWithShadow(textRenderer, clip(d.name() == null || d.name().isBlank() ? d.shortId() : d.name(), lw - 30),
-					lx + 22, ry + 2, sel ? 0xFFFFA0 : 0xFFFFFF);
-			ctx.drawTextWithShadow(textRenderer, "§8" + d.shortId(), lx + 22, ry + 12, 0x808080);
-			if (hov) {
-				ctx.drawTooltip(textRenderer,
-						List.of(Text.literal(d.id()),
-								Text.literal("§7伤害 " + trim(d.damage()) + " 耐久 " + d.maxDurability()
-										+ (ClientStudioState.isMissing(d.id()) ? " §c(失效)" : ""))),
-						mouseX, mouseY);
-			}
-		}
-		if (rows.size() > maxRows) {
-			ctx.drawTextWithShadow(textRenderer, "§7" + (listScroll + 1) + "-" + Math.min(rows.size(), listScroll + maxRows)
-					+ " / " + rows.size() + "（滚轮滚动）", lx, ly + maxRows * rowH + 4, 0x808080);
-		}
-	}
-
-	private void drawIcon(DrawContext ctx, String texture, int x, int y) {
-		Item item = iconItemFor(texture);
-		if (item != Items.AIR) {
-			ctx.drawItem(new ItemStack(item), x, y);
-		}
-	}
-
-	/** vanilla texture id -> the Item that owns it, for icon rendering in the picker/list */
-	static Item iconItemFor(String texture) {
-		if (texture == null) {
-			return Items.AIR;
-		}
-		String path = texture.substring(texture.lastIndexOf('/') + 1);
-		Identifier id = Identifier.tryParse("minecraft", path);
-		return id == null ? Items.AIR : Registries.ITEM.get(id);
-	}
-
-	// ---------- appearance picker ----------
-
-	private void renderPickerContent(DrawContext ctx, int mouseX, int mouseY) {
-		int ox = x0 + 160, oy = y0 + 16, ow = panelW - 168, oh = panelH - 40;
-		ctx.drawBorder(ox, oy, ow, oh, 0xFF6A6A9E);
-		ctx.drawTextWithShadow(textRenderer, "§b选择外观（原版贴图槽位目录）", ox + 8, oy + 6, 0xFFFFFF);
-		ctx.drawTextWithShadow(textRenderer, "§7当前: " + draftTexture, ox + 8, oy + 17, 0x909090);
-
-		var slots = AppearanceSlots.slots();
-		int cell = 30, cols = Math.max(1, (ow - 16) / (cell + 4));
-		pickerZones.clear();
-		for (int i = 0; i < slots.size(); i++) {
-			int cx = ox + 8 + (i % cols) * (cell + 4);
-			int cy = oy + 30 + (i / cols) * (cell + 4);
-			boolean hov = mouseX >= cx && mouseX <= cx + cell && mouseY >= cy && mouseY <= cy + cell;
-			ctx.fill(cx, cy, cx + cell, cy + cell, slots.get(i).texture().equals(draftTexture) ? 0x803060C0 : hov ? 0x50FFFFFF : 0x40000000);
-			ctx.drawBorder(cx, cy, cell, cell, 0xFF555555);
-			drawIcon(ctx, slots.get(i).texture(), cx + 7, cy + 7);
-			pickerZones.add(new int[]{cx, cy, cell, i});
-		}
-		ctx.drawTextWithShadow(textRenderer, "§7点击选择 · ESC 取消（仅目录内 15 个预置槽位可用）", ox + 8, oy + oh - 14, 0x808080);
-	}
-
-	// ---------- delete confirm ----------
-
-	private void renderDeleteConfirmContent(DrawContext ctx) {
-		int ox = x0 + 90, oy = y0 + 60, ow = panelW - 180, oh = 130;
-		ctx.drawBorder(ox, oy, ow, oh, 0xFF8A3A3A);
-		ctx.drawCenteredTextWithShadow(textRenderer, "§c确认删除该物品定义？", ox + ow / 2, oy + 14, 0xFFFFFF);
-		ctx.drawCenteredTextWithShadow(textRenderer, "§f" + clip(selectedId == null ? "" : selectedId, ow - 20), ox + ow / 2, oy + 28, 0xCCCCCC);
-		ctx.drawTextWithShadow(textRenderer, "§7· 删除定义 ≠ 删除玩家背包中的物品实例", ox + 14, oy + 50, 0xA0A0A0);
-		ctx.drawTextWithShadow(textRenderer, "§7· 存量物品会进入可识别的失效状态（不崩溃、不销毁）", ox + 14, oy + 62, 0xA0A0A0);
-		ctx.drawTextWithShadow(textRenderer, "§7· 以相同 ID 重新创建定义后自动恢复", ox + 14, oy + 74, 0xA0A0A0);
-		// manual hit-zone buttons (kept out of the widget tree so ESC zones stay clean)
-		int byy = oy + oh - 30;
-		ctx.fill(ox + 14, byy, ox + 14 + 90, byy + 20, 0xFF7A2020);
-		ctx.drawBorder(ox + 14, byy, 90, 20, 0xFFB06060);
-		ctx.drawCenteredTextWithShadow(textRenderer, "§c确认删除", ox + 59, byy + 6, 0xFFFFFF);
-		ctx.fill(ox + ow - 104, byy, ox + ow - 14, byy + 20, 0xFF305030);
-		ctx.drawBorder(ox + ow - 104, byy, 90, 20, 0xFF60A060);
-		ctx.drawCenteredTextWithShadow(textRenderer, "取消", ox + ow - 59, byy + 6, 0xFFFFFF);
-		deleteYesZone = new int[]{ox + 14, byy, ox + 104, byy + 20};
-		deleteNoZone = new int[]{ox + ow - 104, byy, ox + ow - 14, byy + 20};
-	}
-
-	private int[] deleteYesZone, deleteNoZone;
-
-	// ---------- input ----------
-
-	@Override
-	public boolean mouseClicked(double mouseX, double mouseY, int button) {
-		if (mode == Mode.APPEAR_PICK) {
-			for (int[] z : pickerZones) {
-				if (mouseX >= z[0] && mouseX <= z[0] + z[2] && mouseY >= z[1] && mouseY <= z[1] + z[2]) {
-					draftTexture = AppearanceSlots.slots().get(z[3]).texture();
-					dirty = true;
-					refreshDraftWidgets();
-					setMode(editorWasEditing ? Mode.EDIT : Mode.CREATE);
-					setStatus("§a外观已选择 " + shortTex(draftTexture) + "，点「保存」提交到服务端");
-					return true;
-				}
-			}
-			return true; // swallow clicks behind the modal
-		}
-		if (mode == Mode.DELETE_CONFIRM) {
-			if (deleteYesZone != null && inZone(deleteYesZone, mouseX, mouseY)) {
-				confirmDelete();
-				return true;
-			}
-			if (deleteNoZone != null && inZone(deleteNoZone, mouseX, mouseY)) {
-				setMode(Mode.EDIT);
-				return true;
-			}
-			return true; // swallow
-		}
-		// list row click
-		int lx = x0 + 8, ly = y0 + 26, lw = 160, rowH = 22;
-		int maxRows = Math.max(1, (panelH - 100) / rowH);
-		if (mouseX >= lx && mouseX <= lx + lw && mouseY >= ly && mouseY < ly + maxRows * rowH) {
-			int idx = listScroll + (int) ((mouseY - ly) / rowH);
-			if (idx >= 0 && idx < rows.size()) {
-				enterEdit(rows.get(idx));
-				return true;
-			}
-		}
-		return super.mouseClicked(mouseX, mouseY, button);
-	}
-
-	private static boolean inZone(int[] z, double mx, double my) {
-		return mx >= z[0] && mx <= z[2] && my >= z[1] && my <= z[3];
-	}
-
-	@Override
-	public boolean mouseScrolled(double mouseX, double mouseY, double amountX, double amountY) {
-		int lx = x0 + 8, ly = y0 + 26, lw = 160;
-		int maxRows = Math.max(1, (panelH - 100) / 22);
-		if (!inModal() && mouseX >= lx && mouseX <= lx + lw && mouseY >= ly && mouseY <= ly + maxRows * 22) {
-			int ns = Math.max(0, Math.min(Math.max(0, rows.size() - maxRows), listScroll - (int) Math.signum(amountY)));
-			if (ns != listScroll) {
-				listScroll = ns;
-				return true;
-			}
-		}
-		return super.mouseScrolled(mouseX, mouseY, amountX, amountY);
-	}
-
-	private boolean inModal() {
-		return mode == Mode.APPEAR_PICK || mode == Mode.DELETE_CONFIRM;
-	}
-
-	// ---------- helpers ----------
 
 	private static String jsonOf(String key, String value) {
 		com.google.gson.JsonObject o = new com.google.gson.JsonObject();
