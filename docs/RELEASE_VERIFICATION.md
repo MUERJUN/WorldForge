@@ -25,6 +25,11 @@ sha256sum build/libs/worldforge-0.1.1.jar build/libs/worldforge-0.1.1-sources.ja
 
 ## v0.1.1 发布产物 SHA-256
 
+最后一个改变 JAR 内容的代码 commit 为 `053be25`（其后的提交仅文档，构建字节
+不变，已实测）。当前 tag 指向的提交用 `git rev-list -n1 v0.1.1` 查询；对 tag
+本身做上表独立克隆构建核查（2026-10-17 实测，三方一致：tag 独立构建 ==
+工作区构建 == Release 附件下载回验）。
+
 发布代码 commit：`053be25`；tag `v0.1.1` = `5c01ab6`（其后仅文档变更，JAR 逐字节不变）。
 
 | 产物 | SHA-256 |
