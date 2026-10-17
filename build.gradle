@@ -66,6 +66,13 @@ java {
 	targetCompatibility = JavaVersion.VERSION_21
 }
 
+// Byte-reproducible archives (release verification #6): fixed entry
+// timestamps and stable ordering, independent of build time / host.
+tasks.withType(AbstractArchiveTask).configureEach {
+	preserveFileTimestamps = false
+	reproducibleFileOrder = true
+}
+
 jar {
 	def projectName = project.name
 	inputs.property "projectName", projectName
