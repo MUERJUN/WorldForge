@@ -1,0 +1,8 @@
+# Deterministic checkout: text files use LF in repo AND working tree, so
+# embedded resources (LICENSE etc.) make builds byte-reproducible regardless
+# of core.autocrlf on the cloning machine.
+* text=auto eol=lf
+*.jar binary
+*.png binary
+*.class binary
+gradlew.bat text eol=crlf
