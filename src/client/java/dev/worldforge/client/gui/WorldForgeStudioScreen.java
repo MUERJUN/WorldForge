@@ -40,7 +40,7 @@ import java.util.Map;
  */
 public class WorldForgeStudioScreen extends Screen {
 
-	public enum Mode { LIST, EDIT, CREATE, APPEAR_PICK, DELETE_CONFIRM }
+	public enum Mode { LIST, EDIT, CREATE, APPEAR_PICK, DELETE_CONFIRM, AI }
 
 	private Mode mode = Mode.LIST;
 	private String selectedId = null; // edit target (server id), null in CREATE
@@ -66,6 +66,7 @@ public class WorldForgeStudioScreen extends Screen {
 	private long inFlightSince = 0L;
 
 	private List<ItemDefinition> rows = new ArrayList<>();
+	private AiStudioPanel aiPanel;
 
 	// appearance picker hit zones, rebuilt each frame
 	private final List<int[]> pickerZones = new ArrayList<>();
@@ -113,9 +114,20 @@ public class WorldForgeStudioScreen extends Screen {
 		fy += 22;
 		backButton = button(rx, fy, rw, 16, "« 返回列表", b -> tryLeaveEditor());
 
+		button(x0 + 8, y0 + panelH - 66, lw, 18, "§d✦ AI 创造面板", b -> enterAi());
 		button(x0 + 8, y0 + panelH - 46, lw, 18, "＋ 创建物品", b -> enterCreate());
 		button(x0 + 8, y0 + panelH - 26, lw / 2 - 2, 16, "刷新", b -> sendRequest("list", ""));
 		button(x0 + 8 + lw / 2 + 2, y0 + panelH - 26, lw / 2 - 2, 16, "关闭 (ESC)", b -> guardedClose());
+
+		aiPanel = new AiStudioPanel();
+		aiPanel.init(x0 + 176, y0 + 24, panelW - 192, panelH - 56,
+				text -> sendRequest("agent_chat", jsonOf("message", text)),
+				() -> sendRequest("agent_confirm", jsonOf("proposalId", aiPanel.pendingProposalId())),
+				() -> sendRequest("agent_cancel", jsonOf("proposalId", aiPanel.pendingProposalId())),
+				() -> sendRequest("list", ""));
+		for (var b : aiPanel.buttons()) {
+			addDrawableChild(b);
+		}
 
 		refreshDraftWidgets();
 		applyMode();
@@ -160,6 +172,19 @@ public class WorldForgeStudioScreen extends Screen {
 	}
 
 	private void applyMode() {
+		if (mode == Mode.AI) {
+			for (TextFieldWidget f : new TextFieldWidget[]{idField, nameField, descField, damageField,
+					durabilityField, param1, param2, cooldownField}) {
+				f.visible = false;
+			}
+			for (ButtonWidget b : new ButtonWidget[]{appearanceButton, triggerButton, actionButton,
+					saveButton, addButton, giveButton, deleteButton, backButton}) {
+				b.visible = false;
+			}
+			aiPanel.input().visible = true;
+			return;
+		}
+		aiPanel.input().visible = false;
 		boolean editor = mode == Mode.EDIT || mode == Mode.CREATE;
 		idField.visible = mode == Mode.CREATE; // id immutable once created (spec 5.1)
 		idField.active = mode == Mode.CREATE;
@@ -257,6 +282,10 @@ public class WorldForgeStudioScreen extends Screen {
 		close();
 	}
 
+	private void enterAi() {
+		setMode(Mode.AI);
+	}
+
 	private void tryLeaveEditor() {
 		closeArmed = false;
 		if (dirty) {
@@ -279,6 +308,9 @@ public class WorldForgeStudioScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+		if (mode == Mode.AI && aiPanel.keyPressed(keyCode, scanCode, modifiers)) {
+			return true;
+		}
 		if (keyCode == 256) { // GLFW_ESCAPE
 			switch (mode) {
 				case APPEAR_PICK, DELETE_CONFIRM -> {
@@ -287,6 +319,10 @@ public class WorldForgeStudioScreen extends Screen {
 				}
 				case EDIT, CREATE -> {
 					tryLeaveEditor();
+					return true;
+				}
+				case AI -> {
+					setMode(Mode.LIST);
 					return true;
 				}
 				default -> {
@@ -548,7 +584,9 @@ public class WorldForgeStudioScreen extends Screen {
 			return;
 		}
 		if (inFlightReqId != 0) {
-			setStatus("§e上一个请求尚未返回（5 秒内自动解除，可稍后点刷新）");
+			if (kind.startsWith("agent_")) {
+				setStatus("§e上一个请求尚未返回（5 秒内自动解除，可稍后点刷新）");
+			}
 			return;
 		}
 		int rid = nextReqId++;
@@ -557,6 +595,9 @@ public class WorldForgeStudioScreen extends Screen {
 		inFlightSince = System.currentTimeMillis();
 		ClientPlayNetworking.send(new WorldForgeStudioProtocol.StudioRequest(kind, rid, payload));
 		setStatus(switch (kind) {
+			case "agent_chat" -> "§d已发送给 AI，等待模型响应…";
+			case "agent_confirm" -> "§7确认提案中…";
+			case "agent_cancel" -> "§7取消提案…";
 			case "list" -> "§7正在读取服务端权威列表…";
 			case "create" -> "§7创建中…";
 			case "update" -> "§7保存中…";
@@ -569,6 +610,12 @@ public class WorldForgeStudioScreen extends Screen {
 
 	/** called on the client thread from the S2C receiver */
 	public void onResponse(WorldForgeStudioProtocol.StudioResponse r) {
+		if ("agent".equals(r.phase()) && r.requestId() == 0) {
+			// unsolicited AI outcome (async model completion)
+			aiPanel.onAgentEvent(r);
+			setStatus(r.ok() ? "§aAI 响应完成" : "§cAI 返回错误");
+			return;
+		}
 		if (r.requestId() != inFlightReqId) {
 			return; // stale reply (abandoned edit / already timed out): never clobber current state
 		}
@@ -600,6 +647,26 @@ public class WorldForgeStudioScreen extends Screen {
 
 		String snapWarn = snapshotOk ? "" : " §c(快照解析失败，请点刷新)";
 		switch (kind) {
+			case "agent_chat" -> aiPanel.onChatAccepted(r.ok(), r.message());
+			case "agent_confirm" -> {
+				if (!r.snapshot().isEmpty()) {
+					ClientStudioState.applySnapshot(r.snapshot());
+					rows = ClientStudioState.list();
+				}
+				aiPanel.onConfirmResult(r.ok(), r.message());
+				if (r.ok() && r.data() != null && r.data().contains("itemId")) {
+					try {
+						var env = com.google.gson.JsonParser.parseString(r.data()).getAsJsonObject();
+						String iid = env.get("itemId").getAsString();
+						var def = ClientStudioState.get(iid);
+						if (def != null) {
+							enterEdit(def); // one click away from 获取测试
+						}
+					} catch (Exception ignored) {
+					}
+				}
+			}
+			case "agent_cancel" -> aiPanel.onCancelResult();
 			case "list" -> setStatus((snapshotOk
 					? "§a已同步服务端列表 · " + rows.size() + " 个物品"
 							+ (ClientStudioState.tombstones().isEmpty() ? "" : " · §c" + ClientStudioState.tombstones().size() + " 个失效标记")
@@ -642,6 +709,9 @@ public class WorldForgeStudioScreen extends Screen {
 	@Override
 	public void tick() {
 		super.tick();
+		if (aiPanel != null) {
+			aiPanel.tick();
+		}
 		if (inFlightReqId != 0 && System.currentTimeMillis() - inFlightSince > 5000) {
 			inFlightReqId = 0;
 			inFlightKind = "";
@@ -667,6 +737,10 @@ public class WorldForgeStudioScreen extends Screen {
 				x0 + panelW - 120, y0 + 9, 0x808080);
 
 		renderListColumn(ctx, mouseX, mouseY);
+
+		if (mode == Mode.AI) {
+			aiPanel.render(ctx, x0 + 176, y0 + 24, panelW - 192, panelH - 56, mouseX, mouseY);
+		}
 
 		if (dirty && (mode == Mode.EDIT || mode == Mode.CREATE)) {
 			ctx.drawTextWithShadow(textRenderer, "§e● 未保存的修改", x0 + panelW - 100, y0 + 18, 0xFFFF55);
@@ -862,6 +936,14 @@ public class WorldForgeStudioScreen extends Screen {
 	}
 
 	@Override
+	public boolean charTyped(char chr, int modifiers) {
+		if (mode == Mode.AI && aiPanel.charTyped(chr, modifiers)) {
+			return true;
+		}
+		return super.charTyped(chr, modifiers);
+	}
+
+	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double amountX, double amountY) {
 		int lx = x0 + 8, ly = y0 + 26, lw = 160;
 		int maxRows = Math.max(1, (panelH - 100) / 22);
@@ -880,6 +962,12 @@ public class WorldForgeStudioScreen extends Screen {
 	}
 
 	// ---------- helpers ----------
+
+	private static String jsonOf(String key, String value) {
+		com.google.gson.JsonObject o = new com.google.gson.JsonObject();
+		o.addProperty(key, value == null ? "" : value);
+		return o.toString();
+	}
 
 	private void setStatus(String s) {
 		statusLine = s;

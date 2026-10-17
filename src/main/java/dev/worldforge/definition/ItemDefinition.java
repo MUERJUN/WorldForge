@@ -97,6 +97,14 @@ public record ItemDefinition(
 		return new ItemDefinition(version, id, newName, description, texture, attributes, behaviors);
 	}
 
+	public ItemDefinition withDescription(String newDescription) {
+		return new ItemDefinition(version, id, name, newDescription, texture, attributes, behaviors);
+	}
+
+	public ItemDefinition withBehaviors(List<BehaviorDefinition> newBehaviors) {
+		return new ItemDefinition(version, id, name, description, texture, attributes, newBehaviors);
+	}
+
 	/** Extract the bare path of the virtual id, e.g. "thunder_sword". */
 	public String shortId() {
 		int i = id.indexOf(':');

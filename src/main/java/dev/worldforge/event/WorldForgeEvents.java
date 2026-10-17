@@ -25,6 +25,8 @@ public final class WorldForgeEvents {
 		// World (server) lifecycle: per-world definition isolation + persistence.
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			WorldForgeRuntimeManager.onServerStarted(server);
+			// v0.3.0: (re)load the server-side agent config for this session
+			dev.worldforge.ai.AgentBridge.reloadConfig(server);
 		});
 
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
@@ -37,6 +39,9 @@ public final class WorldForgeEvents {
 		// definitions lingered and could leak into a later multiplayer session.
 		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
 			WorldForgeRuntimeManager.onServerStopped();
+			// v0.3.0: sessions/proposals/provider are world-bound - never reuse
+			// them across worlds/servers (spec 四.5 / test 12)
+			dev.worldforge.ai.AgentBridge.releaseAll();
 		});
 
 		// Player joined: refresh stacks against current definitions and
@@ -45,6 +50,11 @@ public final class WorldForgeEvents {
 			DynamicItem.refreshAllIn(handler.player.getInventory());
 			DynamicItem.refreshStack(handler.player.playerScreenHandler.getCursorStack());
 			WorldForgePayloads.syncTo(handler.player);
+		});
+
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+			// AI sessions are per-connection: no cross-world/cross-server reuse
+			dev.worldforge.ai.AgentBridge.releasePlayer(handler.player.getUuid());
 		});
 
 		WorldForge.LOGGER.info("[WorldForge] event listeners registered (once)");

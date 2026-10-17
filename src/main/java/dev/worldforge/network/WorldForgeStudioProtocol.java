@@ -64,7 +64,7 @@ public final class WorldForgeStudioProtocol {
 		}
 	}
 
-	public record StudioResponse(int requestId, boolean ok, String phase, String message, String snapshot) implements CustomPayload {
+	public record StudioResponse(int requestId, boolean ok, String phase, String message, String snapshot, String data) implements CustomPayload {
 		public static final Id<StudioResponse> ID = new Id<>(WorldForge.id("studio_response"));
 		public static final PacketCodec<? super RegistryByteBuf, StudioResponse> CODEC =
 				PacketCodec.tuple(
@@ -73,7 +73,12 @@ public final class WorldForgeStudioProtocol {
 						PacketCodecs.STRING, StudioResponse::phase,
 						PacketCodecs.STRING, StudioResponse::message,
 						PacketCodecs.STRING, StudioResponse::snapshot,
+						PacketCodecs.STRING, StudioResponse::data,
 						StudioResponse::new);
+
+		public StudioResponse(int requestId, boolean ok, String phase, String message, String snapshot) {
+			this(requestId, ok, phase, message, snapshot, "");
+		}
 
 		@Override
 		public Id<? extends CustomPayload> getId() {
@@ -84,6 +89,14 @@ public final class WorldForgeStudioProtocol {
 	public static void register() {
 		PayloadTypeRegistry.playC2S().register(StudioRequest.ID, StudioRequest.CODEC);
 		PayloadTypeRegistry.playS2C().register(StudioResponse.ID, StudioResponse.CODEC);
+		// AI outcomes arrive asynchronously; push them to the requesting player
+		// as a synthetic response (requestId 0 = unsolicited agent event channel)
+		dev.worldforge.ai.AgentBridge.OUTCOME_SINK = (player, outcome) -> {
+			if (ServerPlayNetworking.canSend(player, StudioResponse.ID)) {
+				ServerPlayNetworking.send(player, new StudioResponse(0, outcome.ok(), "agent",
+						truncate(outcome.text(), 512), "", truncate(agentEnvelope(outcome), MAX_PAYLOAD_CHARS)));
+			}
+		};
 		ServerPlayNetworking.registerGlobalReceiver(StudioRequest.ID, (payload, context) -> {
 			ServerPlayerEntity player = context.player();
 			MinecraftServer server = context.server();
@@ -128,6 +141,38 @@ public final class WorldForgeStudioProtocol {
 				case "resync" -> {
 					WorldForgePayloads.syncTo(player);
 					reply(server, player, req.requestId(), true, "ok", "resync-sent", true);
+				}
+				case "agent_chat" -> {
+					// AI is server-side by design; the player only sends text.
+					// Non-OP players may still CHAT (read-only proposals), but
+					// confirmProposal enforces OP2 before any mutation.
+					if (!dev.worldforge.ai.AgentBridge.available()) {
+						reply(server, player, req.requestId(), false, "rejected",
+								"AI 未启用：服务器需配置 config/worldforge/agent.json", false);
+						return;
+					}
+					String msg = req.payload() == null ? "" : truncate(req.payload(), 4000);
+					if (msg.isBlank()) {
+						reply(server, player, req.requestId(), false, "rejected", "消息为空", false);
+						return;
+					}
+					// async: outcome arrives via OUTCOME_SINK with requestId 0;
+					// ack now so the GUI can leave its "thinking" state
+					reply(server, player, req.requestId(), true, "agent-accepted", "AI 正在思考…", false);
+					dev.worldforge.ai.AgentBridge.chat(server, player, msg);
+				}
+				case "agent_confirm" -> {
+					String pidId = optId(req.payload());
+					var r = dev.worldforge.ai.AgentBridge.confirmProposal(server, player, pidId);
+					JsonObject data = new JsonObject();
+					data.addProperty("itemId", r.itemId() == null ? "" : r.itemId());
+					replyData(server, player, req.requestId(), r.ok(), r.ok() ? "ok" : "rejected",
+							r.message(), true, data.toString());
+				}
+				case "agent_cancel" -> {
+					String pidId = optId(req.payload());
+					var r = dev.worldforge.ai.AgentBridge.cancelProposal(player, pidId);
+					reply(server, player, req.requestId(), r.ok(), r.ok() ? "ok" : "rejected", r.message(), false);
 				}
 				default -> reply(server, player, req.requestId(), false, "rejected", "未知请求类型: " + kind, false);
 			}
@@ -200,6 +245,11 @@ public final class WorldForgeStudioProtocol {
 
 	private static void reply(MinecraftServer server, ServerPlayerEntity player, int reqId,
 			boolean ok, String phase, String message, boolean withSnapshot) {
+		replyData(server, player, reqId, ok, phase, message, withSnapshot, "");
+	}
+
+	private static void replyData(MinecraftServer server, ServerPlayerEntity player, int reqId,
+			boolean ok, String phase, String message, boolean withSnapshot, String data) {
 		// v0.3.0 fix: a truncated snapshot is INVALID JSON and the client would
 		// silently keep stale state. Never cut JSON mid-stream: when the
 		// snapshot exceeds the wire cap, omit it and tell the player to refresh.
@@ -214,7 +264,7 @@ public final class WorldForgeStudioProtocol {
 			}
 		}
 		StudioResponse resp = new StudioResponse(reqId, ok, phase, truncate(message, 512) + snapshotNote,
-				snapshot);
+				snapshot, truncate(data, 4096));
 		// test hook: the business GameTest suite observes production responses
 		// without a real client connection (mock players cannot "receive").
 		var sink = RESPONSE_SINK;
@@ -245,6 +295,38 @@ public final class WorldForgeStudioProtocol {
 		o.add("items", items);
 		o.add("tombstones", tombs);
 		return o.toString();
+	}
+
+	private static String agentEnvelope(dev.worldforge.ai.AgentBridge.AgentOutcome o) {
+		JsonObject env = new JsonObject();
+		env.addProperty("proposalId", o.proposalId() == null ? "" : o.proposalId());
+		env.addProperty("diff", o.diffSummary() == null ? "" : o.diffSummary());
+		JsonArray gaps = new JsonArray();
+		o.capabilityGaps().forEach(gaps::add);
+		env.add("gaps", gaps);
+		env.addProperty("hasProposal", o.proposal() != null);
+		if (o.proposal() != null) {
+			env.addProperty("kind", o.proposal().kind());
+			env.addProperty("itemId", proposalItemId(o.proposal()));
+		}
+		return env.toString();
+	}
+
+	private static String proposalItemId(dev.worldforge.ai.Proposal p) {
+		if (p instanceof dev.worldforge.ai.Proposal.Create c) return c.id();
+		if (p instanceof dev.worldforge.ai.Proposal.Update u) return u.id();
+		if (p instanceof dev.worldforge.ai.Proposal.Delete d) return d.id();
+		return "";
+	}
+
+	static String optId(String payload) {
+		try {
+			JsonObject o = parseBody(payload);
+			var el = o.get("proposalId");
+			return el != null && el.isJsonPrimitive() ? truncate(el.getAsString(), 128) : "";
+		} catch (Exception e) {
+			return "";
+		}
 	}
 
 	static String truncate(String s, int max) {
