@@ -187,7 +187,7 @@ src/main/resources/
 
 | 项 | 状态 | 验证级别 |
 |---|---|---|
-| 干净 Fabric 1.21.1 客户端能够启动 | ⬜ 未验证 | 需人工 `./gradlew runClient`；本环境无图形会话。GameTest 专用服务端启动 ≠ 客户端启动，不混为一谈 |
+| 干净 Fabric 1.21.1 客户端能够启动 | ✅ 已验证（v0.2.0） | `./gradlew runClient` 在带显示器的 Windows 主机真实启动：LWJGL 3.3.3 渲染、声音引擎、资源加载完成，进入单人世界；日志含 `WorldForge ready … client init done (studio key = K)`；玩家在游戏内执行 `/wf demo` 成功创建 10 件并落盘 `saves/New World/worldforge/items.json`（11 条含行为 JSON） |
 | `/wf demo` 后 10 种物品正常出现 | ✅ 自动化等价 | testB/testC 以 `DemoDefinitions.createAll()` 断言 10 项互异定义创建成功；命令回显到聊天栏未目测 |
 | 不同外观槽位在背包中正确显示 | ✅ 数据层 / ⬜ 视觉层 | testC 断言 ≥4 互异 custom_model_data 槽位写入堆；背包图标实际渲染需 runClient 目测 |
 | 右键技能可以在游戏中实际触发 | ✅ GameTest | testR4 真实 mock 玩家：回血、冷却拦截、速度效果挂身、经验球/闪电实体真实出现在世界中 |
@@ -200,7 +200,7 @@ src/main/resources/
 > **已在真实 Minecraft 专用服务端（Fabric + Yarn 映射）验证**；下列“未验证清单”如实列出尚未人工确认的内容。
 
 ### 未验证清单（不谎报）
-- 真实图形客户端 `runClient` 目测：客户端启动、背包内 10 种物品图标外观差异、tooltip 渲染、附魔闪光 —— 代码路径与模型 JSON 已核实，但未截图人工确认。
+- 客户端启动与命令路径已在真实图形客户端验证（v0.2.0）；**K 键 Studio 界面的像素级目测**（布局/滚动/选择器/输入焦点）仍待人工确认 —— 自动化无法可靠驱动桌面窗口输入，不谎报。
 - 多人（专用服务端 + 真实客户端加入）下的同步与失效显示端到端目测 —— wire 级 codec + 服务端快照测试（R5/R6）通过，双开人工目测未做。
 - "单人世界 A 退出 → 进多人服 B"的真实客户端串扰复现 —— 属代码路径推断的风险（用户报告原话如此），v0.1.2 已从结构上消除（镜像只读 + STOPPED 清态）并有 R7 不变量测试；未做真实双场景目测。
 - K 键 GUI 面板 —— 明确未实现（非 MVP 目标）。
