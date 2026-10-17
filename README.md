@@ -1,4 +1,4 @@
-# WorldForge — Minecraft 运行时动态物品引擎 (MVP 0.1)
+# WorldForge — Minecraft 运行时动态物品引擎 (MVP 0.1 / v0.1.1)
 
 [![build](https://img.shields.io/badge/build-passing-brightgreen)]() [![MC](https://img.shields.io/badge/Minecraft-1.21.1-green)]() [![Loader](https://img.shields.io/badge/Fabric-Loader%200.16.9-blue)]()
 
@@ -103,11 +103,26 @@ src/main/resources/
 **6. 失效状态**
 删除定义后，存量堆保留虚拟 ID 但获得 tombstone：名称显示 `§6[已失效]§r xxx`、tooltip 红字说明、右键返回 FAIL 并提示，不崩溃、不销毁物品（测试 F）。以相同 ID 重建定义后堆自动恢复功能。
 
+## 二·五、v0.1.1 修复迭代（严格 triage）
+
+按严重程度完成六项修复，全部遵循"**先复现 → 新增在修复前失败的回归测试 → 修复 → 全量重跑**"流程：
+
+| # | 问题（v0.1.0 实际源码复现） | 修复 | 回归测试（修复前结果 → 修复后结果） |
+|---|---|---|---|
+| 1 | **保存失败假成功**：`createItem` 先改内存再 `save()`，`save()` 返回 false 被无视 → 内存/磁盘永久分歧，命令仍报“创建成功” | 变更=先落盘、失败即回滚（含 tombstone 还原）并返回带 `lastError` 原因的失败结果；`SERVER_STOPPING` 最终落盘失败会打 ERROR 日志；命令层向玩家显示保存失败 | `testR1`、`testR1b`（用目录占据 items.json 路径确定性制造写失败）**修复前 FAILED → 修复后 PASSED** |
+| 2 | **客户端/服务端共享静态全局**：集成服务端（单人游戏，同一 JVM）里 S2C 同步写回同一个静态 `DEFINITIONS/TOMBSTONES`，可清空服务端墓碑与定义 | 新增 `ClientDefinitionMirror`（仅客户端写入）；显示路径“服务端优先、镜像兜底”；`refreshStack` 只信服务端权威；同步 payload 扩展 tombstone 列表 | `testR2`（镜像写入后断言服务端墓碑仍在、且不反 leak）**修复前 FAILED → 修复后 PASSED**；`testR5` 覆盖 payload 编解码往返 + 纯客户端镜像显示 |
+| 3 | **变更入口分散**：命令直接调 manager、各自散落 sync/refresh 调用，未来 AI Agent 无统一安全面 | 新建 `dev.worldforge.tool.WorldForgeTools` 唯一变更入口（校验→回滚式变更→重烘堆→广播同步一体完成）；`/wf` 全部写命令与 demo 改走工具层；AgentBridge 将来直接绑定这些方法 | 由既有 B/D/E/F/G/H + 新增 R 系列共同覆盖工具路径 |
+| 4 | **失效物品残留攻击力**：删除定义后 `refreshStack` 对无定义堆直接 return，+12 攻击加成、原外观槽位、耐久全部留在堆上 | 无效堆剥离 `ATTRIBUTE_MODIFIERS`、外观回退默认槽位、耐久钳制；虚拟 ID 保留（可恢复）；广播时连同光标槽一起重烘 | `testR3`（删除后断言属性修改器消失）**修复前 FAILED → 修复后 PASSED** |
+| 5 | **缺真实端到端**：技能只测了 ActionResult，无实体/效果断言；无重启进程恢复、无网络层测试 | 新增 `testR4`（真实 mock ServerPlayerEntity：治疗实际回血、冷却实际拦截、速度效果真实挂上、经验球真实生成/吸收、闪电实体真实出现）、`testR5`（PacketCodec 线级往返）；跨进程重启恢复通过持久 run 目录两次连续运行取证（第二次启动日志 `loaded N definitions` 来自第一次落盘文件） | 修复后 14/14 GameTest PASSED（含以上全部） |
+| 6 | **Release 与源码不一致**：核查发现 v0.1.0 tag 指向 commit `cb9cadb`，但 Release 附件 JAR 由之后的 HEAD（`604edde`，删除了 `ClientDefinitionCache`）构建 → tag≠产物 | 建立 `verify-release` 规程：对目标 tag 干净检出→独立构建→SHA-256 比对；v0.1.1 tag 起严格执行并在 `docs/RELEASE_VERIFICATION.md` 记录校验值；v0.1.0 差异以本条记录在案，不回改历史 | 见 docs/RELEASE_VERIFICATION.md（v0.1.1 全流程留痕） |
+
+**诚实说明**：#5 的“客户端视觉（背包图标差异）”“多人服务器联机同步”已实现代码路径并有 wire 级测试，但**尚未在真实图形客户端/双开联机环境人工目测验证**，见“未验证清单”。
+
 ## 三、测试与验证结果
 
 | 测试 | 内容 | 验证方式 | 结果 |
 |---|---|---|---|
-| （编译） | 全源集 main/client/test 编译 | `./gradlew build` | ✅ 编译验证通过 |
+| （编译） | 全源集 main/client/test 编译（v0.1.1） | `./gradlew clean build` | ✅ 编译验证通过 |
 | （单测） | 持久化层 9 项纯 JVM 测试：往返/缺失文件/损坏隔离/逐条容错/校验器/贴图降级/默认值/不可变更新/S2C 一致性 | `./gradlew test`（JUnit 5） | ✅ 9/9 通过 |
 | A | 原生注册表只有 1 个 worldforge Item | GameTest @ 真实服务端 | ✅ 通过 |
 | B | 运行中创建 10 种物品，无需重启 | GameTest @ 真实服务端 | ✅ 通过 |
@@ -117,9 +132,20 @@ src/main/resources/
 | F | 删除定义 → 存量堆失效态、不崩溃、行为 FAIL | GameTest @ 真实服务端 | ✅ 通过 |
 | G | 3× reload 计数稳定为 10、双重注册事件为 no-op | GameTest @ 真实服务端 | ✅ 通过 |
 | H | 真实世界目录写入 `world/worldforge/items.json` 并重载 | GameTest @ 真实服务端 | ✅ 通过（日志+落盘文件为证） |
+| R1/R1b | 写失败必须失败返回 + 内存回滚，旧文件不受损（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过（修复前 FAILED 留档） |
+| R2 | 客户端镜像写入不得破坏服务端墓碑/状态（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过（修复前 FAILED 留档） |
+| R3 | 删除定义后存量堆不得残留攻击加成（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过（修复前 FAILED 留档） |
+| R4 | 治疗/冷却/速度效果/经验/闪电在真实 mock 玩家身上生效（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过 |
+| R5 | S2C payload 线级编解码往返 + 纯客户端镜像显示路径（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过 |
 
-> 汇总：`runGameTest` 输出 **All 8 required tests passed**。
-> **已在真实 Minecraft 专用服务端（Fabric + Yarn 映射）验证**；GUI 面板（K 键）与多人客户端联机视觉外观刷新**尚未做客户端人工验证**（客户端自动化无法截图背包渲染）。
+> 汇总：v0.1.1 `runGameTest` 输出 **All 14 required tests passed**（旧 8 项 + 新 6 项回归/端到端）。
+> R1/R1b/R2/R3 在 v0.1.0 代码上运行得到 **FAILED**（错误信息与上表逐条对应），修复后转 **PASSED** —— 回归有效性已实证。
+> **已在真实 Minecraft 专用服务端（Fabric + Yarn 映射）验证**；下列“未验证清单”如实列出尚未人工确认的内容。
+
+### 未验证清单（不谎报）
+- 真实图形客户端 `runClient` 目测：背包内 10 种物品的图标外观差异、tooltip 渲染、附魔闪光 —— 代码路径与模型 JSON 已核实，但未截图人工确认。
+- 多人（专用服务端 + 真实客户端加入）下的同步与失效显示 —— wire 级 codec 测试通过，端到端联机目测未做。
+- K 键 GUI 面板 —— 明确未实现（非 MVP 目标）。
 
 ## 四、已实现 / 未实现清单
 
