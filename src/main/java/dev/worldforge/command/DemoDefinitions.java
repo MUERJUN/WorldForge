@@ -90,6 +90,31 @@ public final class DemoDefinitions {
 		return n;
 	}
 
+	/**
+	 * Tool-routed demo: every creation goes through WorldForgeTools (rollback
+	 * + broadcast once at the end). A persistence failure aborts cleanly with
+	 * the error message instead of half-applied fake success.
+	 */
+	public static dev.worldforge.tool.WorldForgeTools.ToolResult createAllViaTools(
+			net.minecraft.server.MinecraftServer server) {
+		int created = 0, existed = 0;
+		for (ItemDefinition def : all()) {
+			if (WorldForgeRuntimeManager.get(def.id()) != null) {
+				existed++;
+				continue;
+			}
+			var r = dev.worldforge.tool.WorldForgeTools.createItem(server, def);
+			if (!r.ok()) {
+				return new dev.worldforge.tool.WorldForgeTools.ToolResult(false,
+						"failed at " + def.id() + ": " + r.message());
+			}
+			created++;
+		}
+		dev.worldforge.tool.WorldForgeTools.broadcast(server);
+		return new dev.worldforge.tool.WorldForgeTools.ToolResult(true,
+				"新建 " + created + " 件（已存在 " + existed + " 件保持不变）");
+	}
+
 	private DemoDefinitions() {
 	}
 }

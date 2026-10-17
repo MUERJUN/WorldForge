@@ -41,9 +41,15 @@ public final class DefinitionStore {
 	private static final String FILE_NAME = "items.json";
 
 	private final Path file;
+	/** Reason of the most recent failed save (null if the last save succeeded). */
+	private volatile String lastError = null;
 
 	public DefinitionStore(Path worldforgeDir) {
 		this.file = worldforgeDir.resolve(FILE_NAME);
+	}
+
+	public String lastError() {
+		return lastError;
 	}
 
 	public boolean exists() {
@@ -90,7 +96,11 @@ public final class DefinitionStore {
 		return out;
 	}
 
-	/** Atomic write of all definitions; returns false (and logs) on failure. */
+	/**
+	 * Atomic write of all definitions. On any failure the previous file is
+	 * left untouched (temp-file + atomic move) and {@link #lastError()}
+	 * carries the reason; returns false so callers must NOT report success.
+	 */
 	public boolean save(List<ItemDefinition> definitions) {
 		JsonObject root = new JsonObject();
 		root.addProperty("version", FILE_VERSION);
@@ -109,9 +119,11 @@ public final class DefinitionStore {
 			} catch (AtomicMoveNotSupportedException e) {
 				Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
 			}
+			lastError = null;
 			return true;
-		} catch (IOException e) {
-			WorldForge.LOGGER.error("[WorldForge] failed to save definitions: {}", e.toString());
+		} catch (IOException | RuntimeException e) {
+			lastError = e.getClass().getSimpleName() + ": " + e.getMessage();
+			WorldForge.LOGGER.error("[WorldForge] FAILED to save definitions (previous file kept): {}", e.toString());
 			return false;
 		}
 	}

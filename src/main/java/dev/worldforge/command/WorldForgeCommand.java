@@ -7,7 +7,7 @@ import dev.worldforge.definition.BehaviorDefinition;
 import dev.worldforge.definition.ItemDefinition;
 import dev.worldforge.definition.TextureSource;
 import dev.worldforge.item.DynamicItem;
-import dev.worldforge.network.WorldForgePayloads;
+import dev.worldforge.tool.WorldForgeTools;
 import dev.worldforge.registry.WorldForgeItems;
 import dev.worldforge.runtime.WorldForgeRuntimeManager;
 import com.mojang.brigadier.context.CommandContext;
@@ -133,9 +133,8 @@ public final class WorldForgeCommand {
 				TextureSource.vanilla(AppearanceSlots.guessVanillaTexture(res + " " + name)),
 				Map.of("damage", 4.0, "max_durability", 100.0),
 				List.of());
-		var r = WorldForgeRuntimeManager.createItem(def);
+		var r = WorldForgeTools.createItem(src.getServer(), def);
 		if (r.ok()) {
-			WorldForgePayloads.syncToAll(src.getServer());
 			src.sendFeedback(() -> Text.literal("§a" + r.message()), false);
 			return 1;
 		}
@@ -167,25 +166,20 @@ public final class WorldForgeCommand {
 			src.sendError(Text.literal("§c没有此物品: " + res));
 			return 0;
 		}
-		var r = WorldForgeRuntimeManager.updateItem(d.withAttribute("damage", value));
+		var r = WorldForgeTools.setAttribute(src.getServer(), res, "damage", value);
 		if (r.ok()) {
-			// hot edit: re-bake attributes onto stacks held by players
-			src.getServer().getPlayerManager().getPlayerList().forEach(p ->
-					DynamicItem.refreshAllIn(p.getInventory()));
-			WorldForgePayloads.syncToAll(src.getServer());
 			src.sendFeedback(() -> Text.literal("§a" + res + " 伤害已热改为 " + value
 					+ "（玩家背包中的该物品立即生效，无需重新获取）"), false);
 			return 1;
 		}
-		src.sendError(Text.literal("§c" + r.message()));
+		src.sendError(Text.literal("§c保存失败，修改已回滚: " + r.message()));
 		return 0;
 	}
 
 	private static int delete(ServerCommandSource src, String id) {
 		String res = id.contains(":") ? id : "worldforge:" + id;
-		var r = WorldForgeRuntimeManager.deleteItem(res);
+		var r = WorldForgeTools.deleteItem(src.getServer(), res);
 		if (r.ok()) {
-			WorldForgePayloads.syncToAll(src.getServer());
 			src.sendFeedback(() -> Text.literal("§e" + r.message()), false);
 			return 1;
 		}
@@ -194,24 +188,24 @@ public final class WorldForgeCommand {
 	}
 
 	private static int reload(ServerCommandSource src) {
-		int n = WorldForgeRuntimeManager.reloadDefinitions();
-		if (n < 0) {
-			src.sendError(Text.literal("§c当前世界尚未绑定存储"));
-			return 0;
+		var r = WorldForgeTools.reload(src.getServer());
+		if (r.ok()) {
+			src.sendFeedback(() -> Text.literal("§a" + r.message()), false);
+			return 1;
 		}
-		src.getServer().getPlayerManager().getPlayerList().forEach(p -> DynamicItem.refreshAllIn(p.getInventory()));
-		WorldForgePayloads.syncToAll(src.getServer());
-		src.sendFeedback(() -> Text.literal("§a已从存档重新加载 " + n + " 条定义"), false);
-		return n;
+		src.sendError(Text.literal("§c" + r.message()));
+		return 0;
 	}
 
 	private static int demo(ServerCommandSource src) {
-		int created = DemoDefinitions.createAll();
-		src.getServer().getPlayerManager().getPlayerList().forEach(p -> DynamicItem.refreshAllIn(p.getInventory()));
-		WorldForgePayloads.syncToAll(src.getServer());
-		src.sendFeedback(() -> Text.literal("§a演示物品就绪: 本次新建 " + created + " 件（已存在的保持原状）。"
-				+ "用 /wf give <id> 获取，/wf list 查看"), false);
-		return created;
+		var rr = DemoDefinitions.createAllViaTools(src.getServer());
+		if (!rr.ok()) {
+			src.sendError(Text.literal("§cdemo 失败: " + rr.message()));
+			return 0;
+		}
+		src.sendFeedback(() -> Text.literal("§a演示物品就绪: " + rr.message()
+				+ "。用 /wf give <id> 获取，/wf list 查看"), false);
+		return 1;
 	}
 
 	private static String trim(double d) {

@@ -3,7 +3,7 @@
 	"id": "worldforge",
 	"version": "${version}",
 	"name": "WorldForge",
-	"description": "Runtime dynamic item engine for Minecraft - create, modify and delete virtual items without restarting the game. MVP 0.1.",
+	"description": "Runtime dynamic item engine for Minecraft - create, modify and delete virtual items without restarting the game. v0.1.1: rollback-safe persistence, client/server state split, unified tool layer.",
 	"authors": [
 		"MUERJUN"
 	],

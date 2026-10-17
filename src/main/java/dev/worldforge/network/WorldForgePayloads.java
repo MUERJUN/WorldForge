@@ -3,7 +3,6 @@ package dev.worldforge.network;
 import dev.worldforge.WorldForge;
 import dev.worldforge.persistence.DefinitionStore;
 import dev.worldforge.runtime.WorldForgeRuntimeManager;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.RegistryByteBuf;
@@ -11,22 +10,29 @@ import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.codec.PacketCodecs;
 import net.minecraft.network.packet.CustomPayload;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * S2C definition synchronisation.
  *
- * <p>The client needs definitions to render names/tooltips of dynamic stacks
- * (custom_model_data travels on the stack itself; definition-derived display
- * data does not). Payload = the full definition snapshot in the same JSON
- * format as the on-disk file, sent on join and after every mutation, then
- * mirrored into a client-side definition registry.</p>
+ * <p>Payload = full definition snapshot (same JSON format as the on-disk
+ * file) plus the server tombstone set (ids deleted while stacks survive),
+ * sent on join and after every successful mutation. The client feeds this
+ * into {@link dev.worldforge.runtime.ClientDefinitionMirror} ONLY (issue #2:
+ * never into server state).</p>
  */
 public final class WorldForgePayloads {
 
-	public record SyncDefinitions(String json) implements CustomPayload {
+	public record SyncDefinitions(String json, List<String> tombstones) implements CustomPayload {
 		public static final Id<SyncDefinitions> ID =
 				new Id<>(WorldForge.id("sync_definitions"));
 		public static final PacketCodec<? super RegistryByteBuf, SyncDefinitions> CODEC =
-				PacketCodecs.STRING.xmap(SyncDefinitions::new, SyncDefinitions::json);
+				PacketCodec.tuple(
+						PacketCodecs.STRING, SyncDefinitions::json,
+						PacketCodecs.collection((java.util.function.IntFunction<List<String>>) ArrayList::new,
+								PacketCodecs.STRING), SyncDefinitions::tombstones,
+						SyncDefinitions::new);
 
 		@Override
 		public Id<? extends CustomPayload> getId() {
@@ -43,11 +49,12 @@ public final class WorldForgePayloads {
 		if (!ServerPlayNetworking.canSend(player, SyncDefinitions.ID)) {
 			return;
 		}
-		ServerPlayNetworking.send(player,
-				new SyncDefinitions(DefinitionStore.toJsonString(WorldForgeRuntimeManager.list())));
+		ServerPlayNetworking.send(player, new SyncDefinitions(
+				DefinitionStore.toJsonString(WorldForgeRuntimeManager.list()),
+				List.copyOf(WorldForgeRuntimeManager.tombstones())));
 	}
 
-	/** Sync to all connected players (after create/update/delete/reload). */
+	/** Sync to all connected players (after create/update/delete/reload/join). */
 	public static void syncToAll(net.minecraft.server.MinecraftServer server) {
 		server.getPlayerManager().getPlayerList().forEach(WorldForgePayloads::syncTo);
 	}

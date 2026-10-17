@@ -62,9 +62,32 @@ public class DynamicItem extends Item {
 		return stack.get(WorldForgeComponents.VIRTUAL_ID);
 	}
 
+	/**
+	 * Resolve a virtual id against server truth first, then the client
+	 * mirror (issue #2: on a pure client connected to a remote server the
+	 * server manager is empty and display must use the synced mirror).
+	 */
+	public static ItemDefinition resolveDefinition(String virtualId) {
+		if (virtualId == null) {
+			return null;
+		}
+		ItemDefinition def = WorldForgeRuntimeManager.get(virtualId);
+		if (def == null) {
+			def = dev.worldforge.runtime.ClientDefinitionMirror.get(virtualId);
+		}
+		return def;
+	}
+
+	public static boolean isInvalid(String virtualId) {
+		return virtualId != null
+				&& (WorldForgeRuntimeManager.isMissing(virtualId)
+						|| dev.worldforge.runtime.ClientDefinitionMirror.isMissing(virtualId));
+	}
+
+	/** Definition lookup for display paths (server or mirror). */
 	public static ItemDefinition definitionOf(ItemStack stack) {
 		VirtualId vid = virtualIdOf(stack);
-		return vid == null ? null : WorldForgeRuntimeManager.get(vid.id());
+		return vid == null ? null : resolveDefinition(vid.id());
 	}
 
 	/** Create a fresh stack for a virtual id; returns null if the definition is unknown. */
@@ -89,8 +112,20 @@ public class DynamicItem extends Item {
 	 * them as invalid.
 	 */
 	public static void refreshStack(ItemStack stack) {
-		ItemDefinition def = definitionOf(stack);
+		VirtualId vid = virtualIdOf(stack);
+		if (vid == null) {
+			return; // not a dynamic stack
+		}
+		// refresh is a SERVER operation and must use authoritative truth only
+		ItemDefinition def = WorldForgeRuntimeManager.get(vid.id());
 		if (def == null) {
+			// invalid / deleted definition: strip combat and appearance data
+			// so no surprise attack bonus lingers (issue #4)
+			stack.set(DataComponentTypes.ATTRIBUTE_MODIFIERS, AttributeModifiersComponent.DEFAULT);
+			stack.set(DataComponentTypes.CUSTOM_MODEL_DATA,
+					new CustomModelDataComponent(dev.worldforge.definition.AppearanceSlots.DEFAULT_INDEX));
+			stack.set(DataComponentTypes.MAX_DAMAGE, INVALID_MAX_DAMAGE);
+			stack.remove(DataComponentTypes.DAMAGE);
 			return;
 		}
 		stack.set(DataComponentTypes.MAX_DAMAGE, def.maxDurability());
@@ -116,6 +151,9 @@ public class DynamicItem extends Item {
 		stack.set(DataComponentTypes.ATTRIBUTE_MODIFIERS, amcb.build());
 	}
 
+	/** Durability ceiling for invalid stacks (bar visible, cannot degrade further meaningfully). */
+	private static final int INVALID_MAX_DAMAGE = 1;
+
 	/** Refresh every dynamic stack in a container (player inventory etc.). */
 	public static void refreshAllIn(net.minecraft.entity.player.PlayerInventory inv) {
 		for (int i = 0; i < inv.size(); i++) {
@@ -133,7 +171,7 @@ public class DynamicItem extends Item {
 		}
 		VirtualId vid = virtualIdOf(stack);
 		if (vid != null) {
-			if (WorldForgeRuntimeManager.isMissing(vid.id())) {
+			if (isInvalid(vid.id())) {
 				return Text.literal("§6[已失效]§r " + vid.shortId());
 			}
 			return Text.literal("§7[未定义]§r " + vid.shortId());
@@ -147,7 +185,7 @@ public class DynamicItem extends Item {
 		VirtualId vid = virtualIdOf(stack);
 		if (def == null) {
 			String id = vid == null ? "?" : vid.id();
-			boolean tomb = vid != null && WorldForgeRuntimeManager.isMissing(id);
+			boolean tomb = vid != null && isInvalid(id);
 			tooltip.add(Text.literal(tomb
 					? "定义已删除 - 物品失效 (id: " + id + ")"
 					: "定义缺失 - 无法解析 (id: " + id + ")").formatted(Formatting.RED));
