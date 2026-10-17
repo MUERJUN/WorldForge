@@ -64,6 +64,9 @@ public class WorldForgeClient implements ClientModInitializer {
 			}
 		});
 
+		// v0.3.2: in-game automated GUI check (only active with run/wf-autotest.flag)
+		dev.worldforge.client.dev.StudioAutoTest.register();
+
 		WorldForge.LOGGER.info("[WorldForge] client init done (studio key = K, receivers registered)");
 	}
 }

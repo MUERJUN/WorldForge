@@ -868,6 +868,319 @@ public class WorldForgeStudioScreen extends Screen {
 		}
 	}
 
+	/**
+	 * Ordered trace of one frame's paint stages. The P0 regression (a second
+	 * blur covering custom content) is proved structurally here instead of by
+	 * eyeballing pixels: the expected order is exactly
+	 * [background-blur, panel, widgets].
+	 */
+	private final java.util.List<String> frameTrace = new java.util.ArrayList<>();
+
+	/** stages recorded during the last completed frame (automation hook) */
+	public java.util.List<String> debugFrameTrace() {
+		return java.util.List.copyOf(frameTrace);
+	}
+
+	private boolean blurDoneThisFrame = false;
+
+	@Override
+	public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) {
+		// Screen.render() calls renderBackground() again internally. Without
+		// this gate the second applyBlur() re-blurs the WHOLE framebuffer -
+		// including the WorldForge panel and text we already painted - which
+		// is precisely the "custom content blurry, vanilla widgets sharp"
+		// symptom. One blur per frame; everything we draw afterwards is crisp.
+		if (blurDoneThisFrame) {
+			return;
+		}
+		super.renderBackground(ctx, mouseX, mouseY, delta); // the ONLY blur of this frame
+		blurDoneThisFrame = true;
+		frameTrace.add("background-blur");
+	}
+
+	@Override
+	public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
+		blurDoneThisFrame = false;
+		frameTrace.clear();
+		// 1) vanilla background: blur the game world once, then darken
+		renderBackground(ctx, mouseX, mouseY, delta);
+
+		// 2) WorldForge panel + all custom content paint AFTER the blur
+		frameTrace.add("panel");
+		ctx.fill(x0, y0, x0 + panelW, y0 + panelH, 0xC8101014);
+		ctx.drawBorder(x0, y0, panelW, panelH, 0x90FFFFFF);
+		ctx.drawTextWithShadow(textRenderer, Text.literal("§b§lWorldForge Studio"), x0 + 8, y0 + 8, 0xFFFFFF);
+		ctx.drawTextWithShadow(textRenderer,
+				client.getServer() != null ? "§7当前世界（单人）" : "§7当前服务器（多人）",
+				x0 + panelW - 120, y0 + 9, 0x808080);
+
+		renderListColumn(ctx, mouseX, mouseY);
+
+		if (ui.aiVisible()) {
+			aiPanel.render(ctx, x0 + 176, y0 + 24, panelW - 192, panelH - 56);
+		}
+
+		if (ui.dirty() && ui.editorVisible()) {
+			ctx.drawTextWithShadow(textRenderer, "§e● 未保存的修改", x0 + panelW - 100, y0 + 18, 0xFFFF55);
+		}
+
+		if (mode == Mode.LIST) {
+			int rx = x0 + 176;
+			ctx.drawTextWithShadow(textRenderer, "§7点击左侧物品进行编辑", rx, y0 + 32, 0xAAAAAA);
+			ctx.drawTextWithShadow(textRenderer, "§7或「＋ 创建物品」新建", rx, y0 + 44, 0xAAAAAA);
+			ctx.drawTextWithShadow(textRenderer, "§8所有修改经服务端校验后保存到当前世界存档", rx, y0 + 68, 0x808080);
+			ctx.drawTextWithShadow(textRenderer, "§8退出重进后定义与物品自动恢复", rx, y0 + 80, 0x808080);
+			if (!ClientStudioState.serverReady()) {
+				ctx.drawTextWithShadow(textRenderer, "§e等待服务端 WorldForge 数据…（若服务器未装 Mod 则只读）", rx, y0 + 108, 0xFFAA00);
+			}
+			if (!ClientStudioState.tombstones().isEmpty()) {
+				ctx.drawTextWithShadow(textRenderer, "§c失效定义：" + String.join(", ", ClientStudioState.tombstones()),
+						x0 + 176, y0 + panelH - 60, 0xFF6060);
+			}
+		}
+
+		ctx.fill(x0, y0 + panelH - 14, x0 + panelW, y0 + panelH, 0xFF0A0A12);
+		ctx.drawTextWithShadow(textRenderer, clip(statusLine, panelW - 16), x0 + 6, y0 + panelH - 11, 0xFFFFFF);
+
+		// 3) widget tree above the panel; the renderBackground() inside
+		// super.render() is suppressed by the gate, so nothing re-blurs
+		frameTrace.add("widgets");
+		super.render(ctx, mouseX, mouseY, delta);
+
+		// modal overlays draw above widgets
+		if (mode == Mode.APPEAR_PICK) {
+			renderPickerOverlay(ctx, mouseX, mouseY);
+		} else if (mode == Mode.DELETE_CONFIRM) {
+			renderDeleteConfirmOverlay(ctx);
+		}
+	}
+
+	private void renderPickerOverlay(DrawContext ctx, int mouseX, int mouseY) {
+		int ox = x0 + 160, oy = y0 + 16, ow = panelW - 168, oh = panelH - 40;
+		ctx.fill(ox, oy, ox + ow, oy + oh, 0xF014141C);
+		renderPickerContent(ctx, mouseX, mouseY);
+	}
+
+	private void renderDeleteConfirmOverlay(DrawContext ctx) {
+		int ox = x0 + 90, oy = y0 + 60, ow = panelW - 180, oh = 130;
+		ctx.fill(ox, oy, ox + ow, oy + oh, 0xF414141C);
+		renderDeleteConfirmContent(ctx);
+	}
+
+	private void renderListColumn(DrawContext ctx, int mouseX, int mouseY) {
+		int lx = x0 + 8, ly = y0 + 26, lw = 160, rowH = 22;
+		int maxRows = Math.max(1, (panelH - 100) / rowH);
+		ctx.fill(lx - 2, ly - 2, lx + lw + 2, ly + maxRows * rowH + 2, 0x60000000);
+		if (rows.isEmpty()) {
+			ctx.drawTextWithShadow(textRenderer, "§7（当前世界还没有物品定义）", lx + 4, ly + 6, 0x909090);
+		}
+		for (int i = 0; i < maxRows; i++) {
+			int idx = listScroll + i;
+			if (idx >= rows.size()) {
+				break;
+			}
+			ItemDefinition d = rows.get(idx);
+			int ry = ly + i * rowH;
+			boolean hov = mouseX >= lx && mouseX <= lx + lw && mouseY >= ry && mouseY < ry + rowH;
+			boolean sel = d.id().equals(selectedId);
+			if (sel) {
+				ctx.fill(lx, ry, lx + lw, ry + rowH, 0x603060C0);
+			} else if (hov) {
+				ctx.fill(lx, ry, lx + lw, ry + rowH, 0x30FFFFFF);
+			}
+			drawIcon(ctx, d.texture() == null ? AppearanceSlots.DEFAULT_TEXTURE : d.texture().resource(), lx + 3, ry + 3);
+			ctx.drawTextWithShadow(textRenderer, clip(d.name() == null || d.name().isBlank() ? d.shortId() : d.name(), lw - 30),
+					lx + 22, ry + 2, sel ? 0xFFFFA0 : 0xFFFFFF);
+			ctx.drawTextWithShadow(textRenderer, "§8" + d.shortId(), lx + 22, ry + 12, 0x808080);
+			if (hov) {
+				ctx.drawTooltip(textRenderer,
+						List.of(Text.literal(d.id()),
+								Text.literal("§7伤害 " + trim(d.damage()) + " 耐久 " + d.maxDurability()
+										+ (ClientStudioState.isMissing(d.id()) ? " §c(失效)" : ""))),
+						mouseX, mouseY);
+			}
+		}
+		if (rows.size() > maxRows) {
+			ctx.drawTextWithShadow(textRenderer, "§7" + (listScroll + 1) + "-" + Math.min(rows.size(), listScroll + maxRows)
+					+ " / " + rows.size() + "（滚轮滚动）", lx, ly + maxRows * rowH + 4, 0x808080);
+		}
+	}
+
+	private void drawIcon(DrawContext ctx, String texture, int x, int y) {
+		Item item = iconItemFor(texture);
+		if (item != Items.AIR) {
+			ctx.drawItem(new ItemStack(item), x, y);
+		}
+	}
+
+	/** vanilla texture id -> the Item that owns it, for icon rendering in the picker/list */
+	static Item iconItemFor(String texture) {
+		if (texture == null) {
+			return Items.AIR;
+		}
+		String path = texture.substring(texture.lastIndexOf('/') + 1);
+		Identifier id = Identifier.tryParse("minecraft", path);
+		return id == null ? Items.AIR : Registries.ITEM.get(id);
+	}
+
+	// ---------- appearance picker ----------
+
+	private void renderPickerContent(DrawContext ctx, int mouseX, int mouseY) {
+		int ox = x0 + 160, oy = y0 + 16, ow = panelW - 168, oh = panelH - 40;
+		ctx.drawBorder(ox, oy, ow, oh, 0xFF6A6A9E);
+		ctx.drawTextWithShadow(textRenderer, "§b选择外观（原版贴图槽位目录）", ox + 8, oy + 6, 0xFFFFFF);
+		ctx.drawTextWithShadow(textRenderer, "§7当前: " + draftTexture, ox + 8, oy + 17, 0x909090);
+
+		var slots = AppearanceSlots.slots();
+		int cell = 30, cols = Math.max(1, (ow - 16) / (cell + 4));
+		pickerZones.clear();
+		for (int i = 0; i < slots.size(); i++) {
+			int cx = ox + 8 + (i % cols) * (cell + 4);
+			int cy = oy + 30 + (i / cols) * (cell + 4);
+			boolean hov = mouseX >= cx && mouseX <= cx + cell && mouseY >= cy && mouseY <= cy + cell;
+			ctx.fill(cx, cy, cx + cell, cy + cell, slots.get(i).texture().equals(draftTexture) ? 0x803060C0 : hov ? 0x50FFFFFF : 0x40000000);
+			ctx.drawBorder(cx, cy, cell, cell, 0xFF555555);
+			drawIcon(ctx, slots.get(i).texture(), cx + 7, cy + 7);
+			pickerZones.add(new int[]{cx, cy, cell, i});
+		}
+		ctx.drawTextWithShadow(textRenderer, "§7点击选择 · ESC 取消（仅目录内 15 个预置槽位可用）", ox + 8, oy + oh - 14, 0x808080);
+	}
+
+	// ---------- delete confirm ----------
+
+	private void renderDeleteConfirmContent(DrawContext ctx) {
+		int ox = x0 + 90, oy = y0 + 60, ow = panelW - 180, oh = 130;
+		ctx.drawBorder(ox, oy, ow, oh, 0xFF8A3A3A);
+		ctx.drawCenteredTextWithShadow(textRenderer, "§c确认删除该物品定义？", ox + ow / 2, oy + 14, 0xFFFFFF);
+		ctx.drawCenteredTextWithShadow(textRenderer, "§f" + clip(selectedId == null ? "" : selectedId, ow - 20), ox + ow / 2, oy + 28, 0xCCCCCC);
+		ctx.drawTextWithShadow(textRenderer, "§7· 删除定义 ≠ 删除玩家背包中的物品实例", ox + 14, oy + 50, 0xA0A0A0);
+		ctx.drawTextWithShadow(textRenderer, "§7· 存量物品会进入可识别的失效状态（不崩溃、不销毁）", ox + 14, oy + 62, 0xA0A0A0);
+		ctx.drawTextWithShadow(textRenderer, "§7· 以相同 ID 重新创建定义后自动恢复", ox + 14, oy + 74, 0xA0A0A0);
+		// manual hit-zone buttons (kept out of the widget tree so ESC zones stay clean)
+		int byy = oy + oh - 30;
+		ctx.fill(ox + 14, byy, ox + 14 + 90, byy + 20, 0xFF7A2020);
+		ctx.drawBorder(ox + 14, byy, 90, 20, 0xFFB06060);
+		ctx.drawCenteredTextWithShadow(textRenderer, "§c确认删除", ox + 59, byy + 6, 0xFFFFFF);
+		ctx.fill(ox + ow - 104, byy, ox + ow - 14, byy + 20, 0xFF305030);
+		ctx.drawBorder(ox + ow - 104, byy, 90, 20, 0xFF60A060);
+		ctx.drawCenteredTextWithShadow(textRenderer, "取消", ox + ow - 59, byy + 6, 0xFFFFFF);
+		deleteYesZone = new int[]{ox + 14, byy, ox + 104, byy + 20};
+		deleteNoZone = new int[]{ox + ow - 104, byy, ox + ow - 14, byy + 20};
+	}
+
+	private int[] deleteYesZone, deleteNoZone;
+
+	// ---------- input ----------
+
+	@Override
+	public boolean mouseClicked(double mouseX, double mouseY, int button) {
+		if (mode == Mode.APPEAR_PICK) {
+			for (int[] z : pickerZones) {
+				if (mouseX >= z[0] && mouseX <= z[0] + z[2] && mouseY >= z[1] && mouseY <= z[1] + z[2]) {
+					draftTexture = AppearanceSlots.slots().get(z[3]).texture();
+					ui.markDirty();
+					refreshDraftWidgets();
+					closeModal();
+					setStatus("§a外观已选择 " + shortTex(draftTexture) + "，点「保存」提交到服务端");
+					return true;
+				}
+			}
+			return true; // swallow clicks behind the modal
+		}
+		if (mode == Mode.DELETE_CONFIRM) {
+			if (deleteYesZone != null && inZone(deleteYesZone, mouseX, mouseY)) {
+				confirmDelete();
+				return true;
+			}
+			if (deleteNoZone != null && inZone(deleteNoZone, mouseX, mouseY)) {
+				closeModal();
+				return true;
+			}
+			return true; // swallow
+		}
+		// list row click
+		int lx = x0 + 8, ly = y0 + 26, lw = 160, rowH = 22;
+		int maxRows = Math.max(1, (panelH - 100) / rowH);
+		if (mouseX >= lx && mouseX <= lx + lw && mouseY >= ly && mouseY < ly + maxRows * rowH) {
+			int idx = listScroll + (int) ((mouseY - ly) / rowH);
+			if (idx >= 0 && idx < rows.size()) {
+				enterEdit(rows.get(idx));
+				return true;
+			}
+		}
+		return super.mouseClicked(mouseX, mouseY, button);
+	}
+
+	private static boolean inZone(int[] z, double mx, double my) {
+		return mx >= z[0] && mx <= z[2] && my >= z[1] && my <= z[3];
+	}
+
+	@Override
+	public boolean mouseScrolled(double mouseX, double mouseY, double amountX, double amountY) {
+		int lx = x0 + 8, ly = y0 + 26, lw = 160;
+		int maxRows = Math.max(1, (panelH - 100) / 22);
+		if (!inModal() && mouseX >= lx && mouseX <= lx + lw && mouseY >= ly && mouseY <= ly + maxRows * 22) {
+			int ns = Math.max(0, Math.min(Math.max(0, rows.size() - maxRows), listScroll - (int) Math.signum(amountY)));
+			if (ns != listScroll) {
+				listScroll = ns;
+				return true;
+			}
+		}
+		return super.mouseScrolled(mouseX, mouseY, amountX, amountY);
+	}
+
+	private boolean inModal() {
+		return mode == Mode.APPEAR_PICK || mode == Mode.DELETE_CONFIRM;
+	}
+
+	// ---------- helpers ----------
+
+	// ---------- automation hooks (used by StudioAutoTest; no gameplay effect) ----------
+
+	/** current mode name, for the in-game automated check */
+	public String debugMode() {
+		return ui.mode().name();
+	}
+
+	/** current AI phase name, for the in-game automated check */
+	public String debugAiPhase() {
+		return ui.aiPhase().name();
+	}
+
+	/** named form fields, for the automated check (semantic, not positional) */
+	public TextFieldWidget debugField(String which) {
+		return switch (which) {
+			case "id" -> idField;
+			case "name" -> nameField;
+			case "desc" -> descField;
+			case "damage" -> damageField;
+			case "durability" -> durabilityField;
+			case "ai" -> aiPanel.input();
+			default -> null;
+		};
+	}
+
+	/** the authoritative state machine, for assertions in the automated check */
+	public StudioUiState debugState() {
+		return ui;
+	}
+
+	/**
+	 * Feed a synthetic agent outcome through the REAL response path, so the
+	 * automated check exercises the same code a network reply would.
+	 */
+	public void injectAgentEventForTesting(boolean ok, String proposalId, String kind,
+			String itemId, String diff) {
+		com.google.gson.JsonObject env = new com.google.gson.JsonObject();
+		env.addProperty("proposalId", proposalId);
+		env.addProperty("diff", diff);
+		env.addProperty("hasProposal", ok);
+		env.addProperty("kind", kind);
+		env.addProperty("itemId", itemId);
+		onResponse(new WorldForgeStudioProtocol.StudioResponse(0, ok, "agent",
+				ok ? "（测试注入）已生成提案" : "（测试注入）失败", "", env.toString()));
+	}
+
 	private static String jsonOf(String key, String value) {
 		com.google.gson.JsonObject o = new com.google.gson.JsonObject();
 		o.addProperty(key, value == null ? "" : value);

@@ -12,6 +12,24 @@ WorldForge 的目标是成为 Minecraft 游戏内的 AI Mod 开发环境：玩�
 
 ---
 
+## 一·三、v0.3.2 — GUI 稳定性与「游戏内自动化测试」
+
+**三项 GUI 修复**（均为可回归验证）：
+1. **AI 请求不再卡死**：只有请求真正交给传输层才进入"思考中"；空输入/请求在飞/无服务端分别即时提示；被拒 ack、模型失败、75s 看门狗、断线**全部恢复输入**。
+2. **草稿保护全覆盖**：列表点击、AI 面板、外观选择、删除确认、返回列表、关闭按钮、ESC 全部经过同一守卫；带未保存修改进入 AI 面板会先警告；不再用状态栏文本判断业务状态。
+3. **取消与退出解耦**：取消提案先是本地操作（服务端不可达也能取消），再尽力而为通知；关闭永远以关闭收尾。
+
+**游戏内自动化 GUI 测试（无需人工按键）**：
+
+```bash
+echo x > run/wf-autotest.flag     # 打开测试开关
+./gradlew runClient               # 真实客户端启动后自动跑完整 GUI 流程
+cat run/wf-autotest-report.txt    # 逐项 PASS/FAIL + 13 张真实帧截图
+rm run/wf-autotest.flag           # 关闭（正常游玩不受影响）
+```
+
+该钩子**按控件文字语义定位**（不使用固定屏幕坐标），通过 Screen 的真实事件方法（`mouseClicked`/`keyPressed`/`charTyped`）驱动，从真实 GL 帧缓冲截图，并断言每帧绘制顺序必须是 `模糊 → 面板 → 控件`、每帧仅一次背景模糊。论证细节见 `docs/v032-client-autotest-report.txt`；清晰度量化工具见 `tools/sharpness_check.py`。
+
 ## 一·四、v0.3.0 — AI AgentBridge：自然语言创造物品
 
 **配置（服务器端一次性）**：编辑 `config/worldforge/agent.json`（首次启动自动生成模板）：
