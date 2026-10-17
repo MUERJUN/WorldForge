@@ -178,7 +178,7 @@ public final class BehaviorEngine {
 				BlockPos base = BlockPos.ofFloored(player.getPos().add(look.x * dist, 0, look.z * dist));
 				BlockPos landed = findSafeGround(world, base);
 				if (landed != null && player instanceof ServerPlayerEntity sp) {
-					sp.networkHandler.requestTeleport(landed.getX() + 0.5, landed.getY() + 1.0, landed.getZ() + 0.5,
+					sp.teleport(world, landed.getX() + 0.5, landed.getY() + 1.0, landed.getZ() + 0.5,
 							sp.getYaw(), sp.getPitch());
 					return true;
 				}

@@ -359,7 +359,7 @@ public final class DefinitionStore {
 		return out;
 	}
 
-	static JsonObject toJson(ItemDefinition def) {
+	public static JsonObject toJson(ItemDefinition def) {
 		JsonObject o = new JsonObject();
 		o.addProperty("version", def.version());
 		o.addProperty("id", def.id());
@@ -396,7 +396,7 @@ public final class DefinitionStore {
 		return o;
 	}
 
-	static ItemDefinition fromJson(JsonObject o) {
+	public static ItemDefinition fromJson(JsonObject o) {
 		String id = requireString(o, "id");
 		String name = o.has("name") ? o.get("name").getAsString() : id;
 		String desc = o.has("description") ? o.get("description").getAsString() : "";

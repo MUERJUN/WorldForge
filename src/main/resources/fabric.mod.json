@@ -23,7 +23,8 @@
 		],
 		"fabric-gametest": [
 			"dev.worldforge.test.WorldForgeGameTests",
-			"dev.worldforge.test.WorldForgeV012Tests"
+			"dev.worldforge.test.WorldForgeV012Tests",
+			"dev.worldforge.test.WorldForgeStudioBusinessTests"
 		]
 	},
 	"depends": {

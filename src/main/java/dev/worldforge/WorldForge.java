@@ -51,6 +51,7 @@ public class WorldForge implements ModInitializer {
 		WorldForgeComponents.register();
 		WorldForgeItems.register();
 		WorldForgePayloads.register();
+		dev.worldforge.network.WorldForgeStudioProtocol.register();
 		WorldForgeEvents.register();
 		WorldForgeCommand.register();
 
