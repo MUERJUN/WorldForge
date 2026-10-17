@@ -135,7 +135,7 @@ public final class WorldForgeCommand {
 				List.of());
 		var r = WorldForgeTools.createItem(src.getServer(), def);
 		if (r.ok()) {
-			src.sendFeedback(() -> Text.literal("§a" + r.message()), false);
+			src.sendFeedback(() -> Text.literal("§a" + r.message() + syncHint(r)), false);
 			return 1;
 		}
 		src.sendError(Text.literal("§c" + r.message()));
@@ -169,10 +169,10 @@ public final class WorldForgeCommand {
 		var r = WorldForgeTools.setAttribute(src.getServer(), res, "damage", value);
 		if (r.ok()) {
 			src.sendFeedback(() -> Text.literal("§a" + res + " 伤害已热改为 " + value
-					+ "（玩家背包中的该物品立即生效，无需重新获取）"), false);
+					+ "（玩家背包中的该物品立即生效，无需重新获取）" + syncHint(r)), false);
 			return 1;
 		}
-		src.sendError(Text.literal("§c保存失败，修改已回滚: " + r.message()));
+		src.sendError(Text.literal("§c失败: " + r.message()));
 		return 0;
 	}
 
@@ -206,6 +206,15 @@ public final class WorldForgeCommand {
 		src.sendFeedback(() -> Text.literal("§a演示物品就绪: " + rr.message()
 				+ "。用 /wf give <id> 获取，/wf list 查看"), false);
 		return 1;
+	}
+
+	/** surface non-OK sync phases so partial client-delivery failures are visible */
+	private static String syncHint(WorldForgeTools.ToolResult r) {
+		return switch (r.sync()) {
+			case PARTIAL -> "§7（部分客户端同步失败，可 /wf reload 重试）";
+			case FAILED -> "§c（客户端同步失败，可 /wf reload 重试）";
+			default -> "";
+		};
 	}
 
 	private static String trim(double d) {

@@ -22,7 +22,8 @@
 			"dev.worldforge.client.WorldForgeClient"
 		],
 		"fabric-gametest": [
-			"dev.worldforge.test.WorldForgeGameTests"
+			"dev.worldforge.test.WorldForgeGameTests",
+			"dev.worldforge.test.WorldForgeV012Tests"
 		]
 	},
 	"depends": {

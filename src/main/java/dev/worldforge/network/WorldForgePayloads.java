@@ -51,6 +51,11 @@ public final class WorldForgePayloads {
 				List.copyOf(WorldForgeRuntimeManager.tombstones()));
 	}
 
+	/** True when this player's client registered our sync channel (WF client). */
+	public static boolean clientSupportsSync(net.minecraft.server.network.ServerPlayerEntity player) {
+		return ServerPlayNetworking.canSend(player, SyncDefinitions.ID);
+	}
+
 	/** Send the current definition snapshot to one player (no-op for vanilla clients). */
 	public static void syncTo(net.minecraft.server.network.ServerPlayerEntity player) {
 		if (!ServerPlayNetworking.canSend(player, SyncDefinitions.ID)) {

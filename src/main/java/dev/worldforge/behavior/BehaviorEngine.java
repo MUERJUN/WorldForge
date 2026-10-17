@@ -53,7 +53,7 @@ public final class BehaviorEngine {
 	// ---------- trigger: right_click ----------
 
 	public static ActionResult onRightClick(ServerWorld world, ServerPlayerEntity player, ItemStack stack, Hand hand) {
-		ItemDefinition def = DynamicItem.definitionOf(stack);
+		ItemDefinition def = DynamicItem.definitionForLogic(stack);
 		if (def == null) {
 			// deleted/missing definition: identifiable inert state, never a crash (test F)
 			VirtualId vid = DynamicItem.virtualIdOf(stack);
@@ -100,7 +100,7 @@ public final class BehaviorEngine {
 	// ---------- trigger: hit_entity ----------
 
 	public static void onHitEntity(ServerWorld world, LivingEntity attacker, LivingEntity target, ItemStack stack) {
-		ItemDefinition def = DynamicItem.definitionOf(stack);
+		ItemDefinition def = DynamicItem.definitionForLogic(stack);
 		if (def == null || !(attacker instanceof PlayerEntity player)) {
 			return;
 		}

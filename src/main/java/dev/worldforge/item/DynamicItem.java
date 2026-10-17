@@ -63,28 +63,61 @@ public class DynamicItem extends Item {
 	}
 
 	/**
-	 * Resolve a virtual id against server truth first, then the client
-	 * mirror (issue #2: on a pure client connected to a remote server the
-	 * server manager is empty and display must use the synced mirror).
+	 * AUTHORITATIVE lookup for game logic (behaviour dispatch, stack refresh,
+	 * give/create). Always reads the server manager - never the client
+	 * mirror - so an integrated-server JVM cannot execute logic off stale
+	 * synced display data. (v0.1.2 issue #1)
+	 */
+	public static ItemDefinition definitionForLogic(ItemStack stack) {
+		VirtualId vid = virtualIdOf(stack);
+		return vid == null ? null : WorldForgeRuntimeManager.get(vid.id());
+	}
+
+	/**
+	 * Client DISPLAY resolution: reads the {@link dev.worldforge.runtime.ClientDefinitionMirror}
+	 * ONLY. Falling back to the server manager here used to leak the previous
+	 * world's definitions into a new multiplayer session on the same JVM
+	 * (v0.1.2 issue #1: leave single-player world A with worldforge:x, join
+	 * server B that defines a different worldforge:x -> stale name/stats).
+	 */
+	public static ItemDefinition resolveForClientDisplay(String virtualId) {
+		return dev.worldforge.runtime.ClientDefinitionMirror.get(virtualId);
+	}
+
+	/**
+	 * Environment-aware display resolution. In any client JVM (including the
+	 * integrated server of single player) the mirror is the ONLY display
+	 * source; on a dedicated server there is no local client, so the
+	 * authoritative manager is used for logs/messages.
 	 */
 	public static ItemDefinition resolveDefinition(String virtualId) {
 		if (virtualId == null) {
 			return null;
 		}
-		ItemDefinition def = WorldForgeRuntimeManager.get(virtualId);
-		if (def == null) {
-			def = dev.worldforge.runtime.ClientDefinitionMirror.get(virtualId);
+		if (net.fabricmc.api.EnvType.CLIENT == net.fabricmc.loader.api.FabricLoader.getInstance().getEnvironmentType()) {
+			return ClientMirrorAccess.display(virtualId);
 		}
-		return def;
+		return WorldForgeRuntimeManager.get(virtualId);
+	}
+
+	/** indirection keeps the client package optional on a dedicated server */
+	static final class ClientMirrorAccess {
+		static ItemDefinition display(String id) {
+			return dev.worldforge.runtime.ClientDefinitionMirror.get(id);
+		}
 	}
 
 	public static boolean isInvalid(String virtualId) {
-		return virtualId != null
-				&& (WorldForgeRuntimeManager.isMissing(virtualId)
-						|| dev.worldforge.runtime.ClientDefinitionMirror.isMissing(virtualId));
+		if (virtualId == null) {
+			return false;
+		}
+		if (net.fabricmc.api.EnvType.CLIENT == net.fabricmc.loader.api.FabricLoader.getInstance().getEnvironmentType()) {
+			return dev.worldforge.runtime.ClientDefinitionMirror.isMissing(virtualId);
+		}
+		return WorldForgeRuntimeManager.isMissing(virtualId);
 	}
 
-	/** Definition lookup for display paths (server or mirror). */
+	/** Definition lookup for display paths (environment-aware). */
 	public static ItemDefinition definitionOf(ItemStack stack) {
 		VirtualId vid = virtualIdOf(stack);
 		return vid == null ? null : resolveDefinition(vid.id());

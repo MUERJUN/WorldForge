@@ -31,6 +31,14 @@ public final class WorldForgeEvents {
 			WorldForgeRuntimeManager.onServerStopping(server);
 		});
 
+		// v0.1.2 issue #1: release ALL server static state after the world is
+		// fully stopped. In the integrated server this happens when leaving a
+		// single-player world inside the same JVM; without it, world A's
+		// definitions lingered and could leak into a later multiplayer session.
+		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+			WorldForgeRuntimeManager.onServerStopped();
+		});
+
 		// Player joined: refresh stacks against current definitions and
 		// push the definition snapshot so client tooltips/names resolve.
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {

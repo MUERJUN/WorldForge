@@ -56,7 +56,61 @@ public final class DefinitionStore {
 		return Files.isRegularFile(file);
 	}
 
-	/** Load all definitions; never throws - failures are logged and skipped. */
+	/** Result of a non-destructive load attempt (v0.1.2 issue #3). */
+	public record LoadResult(boolean ok, List<ItemDefinition> definitions, String error) {
+		public static LoadResult ok(List<ItemDefinition> defs) {
+			return new LoadResult(true, defs, null);
+		}
+
+		public static LoadResult failed(String error) {
+			return new LoadResult(false, List.of(), error);
+		}
+	}
+
+	/**
+	 * Parse WITHOUT side effects: never moves the file aside and never
+	 * reports a corrupt file as "empty project". Callers must keep their
+	 * current runtime state when {@code ok == false} (issue #3: /wf reload
+	 * against a damaged file used to wipe live definitions).
+	 */
+	public LoadResult tryLoad() {
+		if (!exists()) {
+			// no file yet: a legitimately empty project (first run) is OK
+			return LoadResult.ok(List.of());
+		}
+		JsonElement root;
+		try {
+			String text = Files.readString(file, StandardCharsets.UTF_8);
+			root = JsonParser.parseString(text);
+		} catch (Exception e) {
+			return LoadResult.failed("unreadable definitions file: " + e);
+		}
+		if (!root.isJsonObject()) {
+			return LoadResult.failed("definitions file is not a JSON object");
+		}
+		JsonObject obj = root.getAsJsonObject();
+		int version = obj.has("version") ? obj.get("version").getAsInt() : 0;
+		if (version > FILE_VERSION) {
+			WorldForge.LOGGER.warn("[WorldForge] definitions file version {} newer than supported {}; attempting best-effort load", version, FILE_VERSION);
+		}
+		List<ItemDefinition> out = new ArrayList<>();
+		JsonArray items = obj.has("items") && obj.get("items").isJsonArray() ? obj.getAsJsonArray("items") : new JsonArray();
+		for (JsonElement el : items) {
+			if (!el.isJsonObject()) {
+				WorldForge.LOGGER.warn("[WorldForge] skipping non-object item entry");
+				continue;
+			}
+			try {
+				out.add(fromJson(el.getAsJsonObject()));
+			} catch (Exception e) {
+				WorldForge.LOGGER.warn("[WorldForge] skipping invalid item definition: {}", e.toString());
+			}
+		}
+		return LoadResult.ok(out);
+	}
+
+	/** Load all definitions for WORLD STARTUP; corrupt file is quarantined so
+	 *  the fresh session can save cleanly. (Reload must use {@link #tryLoad()}.) */
 	public List<ItemDefinition> load() {
 		List<ItemDefinition> out = new ArrayList<>();
 		if (!exists()) {

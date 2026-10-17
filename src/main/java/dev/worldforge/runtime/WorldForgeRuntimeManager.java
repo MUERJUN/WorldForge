@@ -212,16 +212,53 @@ public final class WorldForgeRuntimeManager {
 		}
 	}
 
-	/** Re-read definitions from disk, replacing the runtime map. */
-	public static synchronized int reloadDefinitions() {
+	/**
+	 * Server world fully stopped: drop ALL server-side static state (v0.1.2
+	 * issue #1). In the client JVM an integrated server can start and stop
+	 * between worlds inside one process; leaving world A's definitions in a
+	 * static map let later code paths (and a naive display fallback) see
+	 * stale ids from the previous world when joining a different server.
+	 * The client display path now reads the mirror only, and the mirror is
+	 * cleared on disconnect, so both directions of leakage are closed.
+	 */
+	public static synchronized void onServerStopped() {
+		DEFINITIONS.clear();
+		TOMBSTONES.clear();
+		store = null;
+		loadedWorldKey = null;
+		WorldForge.LOGGER.info("[WorldForge] server state released (world stopped)");
+	}
+
+	/** Outcome of a reload attempt (v0.1.2 issue #3). */
+	public record ReloadOutcome(boolean ok, int count, String error) {}
+
+	/**
+	 * Re-read definitions from disk and replace the runtime map - but ONLY
+	 * when the read succeeds. A damaged/unreadable file now returns
+	 * {@code ok=false} and the live runtime state is KEPT (previously the map
+	 * was cleared first, so /wf reload on a corrupt file silently wiped the
+	 * running project and a later save could persist the empty set). No
+	 * quarantine happens here either: the backup decision is left to the
+	 * player (the file on disk is untouched). Session tombstones are
+	 * preserved; ids that vanished from a GOOD file gain a tombstone.
+	 *
+	 * <p>return codes (legacy int view): -1 unbound store, -2 load failure
+	 * (state preserved), >=0 number of loaded definitions.</p>
+	 */
+	public static synchronized ReloadOutcome reload() {
 		DefinitionStore s = store;
 		if (s == null) {
-			return -1;
+			return new ReloadOutcome(false, -1, "当前世界尚未绑定存储");
+		}
+		DefinitionStore.LoadResult loaded = s.tryLoad();
+		if (!loaded.ok()) {
+			WorldForge.LOGGER.error("[WorldForge] reload ABORTED, live definitions kept: {}", loaded.error());
+			return new ReloadOutcome(false, -2, "读取定义失败，已保留当前运行时定义（文件未改动）: " + loaded.error());
 		}
 		Map<String, ItemDefinition> previous = Map.copyOf(DEFINITIONS);
 		DEFINITIONS.clear();
 		int n = 0;
-		for (ItemDefinition def : s.load()) {
+		for (ItemDefinition def : loaded.definitions()) {
 			DefinitionValidator.Result v = DefinitionValidator.validate(def);
 			if (!v.ok()) {
 				WorldForge.LOGGER.warn("[WorldForge] reload skipped invalid {}: {}", def.id(), v.errors());
@@ -237,7 +274,12 @@ public final class WorldForgeRuntimeManager {
 			}
 		}
 		WorldForge.LOGGER.info("[WorldForge] reloaded {} definitions", n);
-		return n;
+		return new ReloadOutcome(true, n, null);
+	}
+
+	/** Legacy wrapper; see {@link #reload()} for failure semantics. */
+	public static int reloadDefinitions() {
+		return reload().count();
 	}
 
 	/** Test hook: bind a store (null = in-memory mode) and clear state. */

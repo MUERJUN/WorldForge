@@ -483,17 +483,26 @@ public class WorldForgeGameTests {
 		WorldForgeRuntimeManager.attachStoreForTesting(null);
 		dev.worldforge.runtime.ClientDefinitionMirror.replaceAllFromSync(decoded.json(), decoded.tombstones());
 
+		// v0.1.2 issue #1: display resolution is environment-aware. On this
+		// server-side test thread getName() reads the AUTHORITATIVE manager
+		// (empty here), so mirror verification goes through the explicit
+		// client-display resolver - which must read the MIRROR only.
 		ItemStack stack = new ItemStack(WorldForgeItems.DYNAMIC_ITEM, 1);
 		stack.set(dev.worldforge.component.WorldForgeComponents.VIRTUAL_ID,
 				new dev.worldforge.component.VirtualId("worldforge:r5_item"));
-		ctx.assertTrue(stack.getName().getString().contains("R5同步"),
-				"display must resolve via client mirror, got: " + stack.getName().getString());
+		var mirrorDef = DynamicItem.resolveForClientDisplay("worldforge:r5_item");
+		ctx.assertTrue(mirrorDef != null && mirrorDef.name().contains("R5同步"),
+				"client display must resolve via mirror, got: " + mirrorDef);
+		ctx.assertTrue(WorldForgeRuntimeManager.get("worldforge:r5_item") == null,
+				"mirror content must NOT leak into server state");
+		// server-side display must show the invalid marker even though the
+		// mirror knows the definition (proves the two stores are separated)
+		ctx.assertTrue(stack.getName().getString().contains("未定义"),
+				"server display must ignore mirror-only ids, got: " + stack.getName().getString());
 
-		// tombstone from the wire drives the invalid marker too
-		stack.set(dev.worldforge.component.WorldForgeComponents.VIRTUAL_ID,
-				new dev.worldforge.component.VirtualId("worldforge:gone"));
-		ctx.assertTrue(stack.getName().getString().contains("失效"),
-				"mirrored tombstone must show 已失效, got: " + stack.getName().getString());
+		// tombstone from the wire lands in the mirror's invalid set
+		ctx.assertTrue(dev.worldforge.runtime.ClientDefinitionMirror.isMissing("worldforge:gone"),
+				"mirrored tombstone must mark the id missing for the client");
 
 		dev.worldforge.runtime.ClientDefinitionMirror.clear();
 		ctx.complete();
@@ -553,6 +562,50 @@ public class WorldForgeGameTests {
 			player.networkHandler.disconnect(net.minecraft.text.Text.literal("r6 done"));
 		}
 		dev.worldforge.runtime.ClientDefinitionMirror.clear();
+		ctx.complete();
+	}
+
+	// ---- Test R8 (v0.1.2 issue #3): reload on a CORRUPT file must keep the
+	// live definitions (v0.1.1 cleared first -> wipe + later empty save) ----
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-regression")
+	public void testR8_reloadOnCorruptFilePreservesState(TestContext ctx) {
+		java.nio.file.Path dir;
+		try {
+			dir = Files.createTempDirectory("wf-r8");
+		} catch (Exception e) {
+			throw new RuntimeException("setup", e);
+		}
+		DefinitionStore store = new DefinitionStore(dir);
+		WorldForgeRuntimeManager.attachStoreForTesting(store);
+		ItemDefinition live = new ItemDefinition(ItemDefinition.CURRENT_VERSION,
+				"worldforge:r8_live", "R8活动定义", "", TextureSource.vanilla("minecraft:item/diamond"),
+				Map.of("damage", 4.0, "max_durability", 10.0), List.of());
+		ctx.assertTrue(WorldForgeRuntimeManager.createItem(live).ok(), "create ok");
+		// simulate: file on disk got damaged by something external
+		try {
+			Files.writeString(dir.resolve("items.json"), "{[[[ broken json ]]]");
+		} catch (Exception e) {
+			throw new RuntimeException("corrupt setup", e);
+		}
+
+		int n = WorldForgeRuntimeManager.reloadDefinitions();
+		// CORRECT (v0.1.2): a failed read returns a negative marker AND the live
+		// definition survives, file untouched. (v0.1.1: load() quarantined and
+		// returned empty, map cleared -> both assertions below FAILED.)
+		ctx.assertTrue(WorldForgeRuntimeManager.get("worldforge:r8_live") != null,
+				"corrupt-file reload must NOT wipe live definitions (count was " + n + ")");
+		ctx.assertTrue(n < 0, "failed reload must be reported as failure, got count " + n);
+		try {
+			ctx.assertTrue(Files.exists(dir.resolve("items.json")),
+						"reload failure must not quarantine/move the player's file");
+			// a subsequent save must persist the LIVE state, not an empty set
+			ctx.assertTrue(store.save(WorldForgeRuntimeManager.list()), "resave ok");
+			ctx.assertTrue(DefinitionStore.fromJsonString(Files.readString(dir.resolve("items.json")))
+						.stream().anyMatch(d -> d.id().equals("worldforge:r8_live")),
+						"save after failed reload must still contain the live definition");
+		} catch (java.io.IOException e) {
+			throw new RuntimeException(e);
+		}
 		ctx.complete();
 	}
 

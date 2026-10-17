@@ -105,13 +105,13 @@ public final class DemoDefinitions {
 			}
 			var r = dev.worldforge.tool.WorldForgeTools.createItem(server, def);
 			if (!r.ok()) {
-				return new dev.worldforge.tool.WorldForgeTools.ToolResult(false,
-						"failed at " + def.id() + ": " + r.message());
+				return r; // propagate the three-phase failure untouched
 			}
 			created++;
 		}
 		dev.worldforge.tool.WorldForgeTools.broadcast(server);
-		return new dev.worldforge.tool.WorldForgeTools.ToolResult(true,
+		return new dev.worldforge.tool.WorldForgeTools.ToolResult(true, true,
+				dev.worldforge.tool.WorldForgeTools.ToolResult.SyncStatus.OK,
 				"新建 " + created + " 件（已存在 " + existed + " 件保持不变）");
 	}
 

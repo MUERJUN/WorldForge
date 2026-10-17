@@ -1,5 +1,18 @@
 # 更新日志
 
+## v0.1.2 — 深度修复迭代（3 项 P1）
+
+1. **跨世界状态泄漏**：客户端显示只读镜像（`resolveForClientDisplay`），服务端逻辑只读权威态
+   （`definitionForLogic`）；`SERVER_STOPPED` 清空集成服务端全部静态状态（R7）。
+   *风险为代码路径推断，未经真实客户端目测复现，如实标注。*
+2. **结果三段化**：`ToolResult(persisted, applied, sync)` + `needsRetry()` + `resync()` 重试钩子；
+   同步吞异常导致假 ok 的路径关闭（R9）。
+3. **保守 reload**：损坏文件不再清空运行时、不再自动隔离玩家文件；`tryLoad()` 零副作用，
+   失败返回明确错误由玩家决策（R8 在 v0.1.1 上实测 FAILED 取证，见
+   `docs/evidence-r8-failed-on-v0.1.1.log`；R10）。
+
+GameTest 15 → 19 项全通过；JUnit 9 项全通过。
+
 ## v0.1.1 — 严格修复迭代（六项 triage）
 
 保留全部 Fabric 1.21.1 MVP 功能，不增加 AI / 方块 / 实体。按严重程度修复：

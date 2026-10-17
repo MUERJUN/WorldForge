@@ -1,0 +1,217 @@
+
+> Configure project :
+Fabric Loom: 1.12.7
+:remapping sources
+
+> Task :compileJava
+E:\javas\wf-011\src\main\java\dev\worldforge\test\WorldForgeGameTests.java:382: 警告: [removal] TestContext 中的 createMockCreativeServerPlayerInWorld() 已过时, 且标记为待删除
+		net.minecraft.server.network.ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		                                                            ^
+E:\javas\wf-011\src\main\java\dev\worldforge\test\WorldForgeGameTests.java:549: 警告: [removal] TestContext 中的 createMockCreativeServerPlayerInWorld() 已过时, 且标记为待删除
+		net.minecraft.server.network.ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		                                                            ^
+2 个警告
+
+> Task :processResources
+> Task :classes
+> Task :generateLog4jConfig
+> Task :generateRemapClasspath
+> Task :generateDLIConfig
+> Task :configureLaunch
+
+> Task :runGameTest
+[11:39:45] [main/INFO] (FabricLoader/GameProvider) Loading Minecraft 1.21.1 with Fabric Loader 0.16.9
+[11:39:46] [main/INFO] (FabricLoader) Loading 43 mods:
+	- fabric-api 0.116.5+1.21.1
+	- fabric-api-base 0.4.42+6573ed8c19
+	- fabric-api-lookup-api-v1 1.6.71+b559734419
+	- fabric-biome-api-v1 13.0.31+d527f9fd19
+	- fabric-block-api-v1 1.1.0+0bc3503219
+	- fabric-block-view-api-v2 1.0.11+ebb2264e19
+	- fabric-command-api-v1 1.2.49+f71b366f19
+	- fabric-command-api-v2 2.2.28+6ced4dd919
+	- fabric-commands-v0 0.2.66+df3654b319
+	- fabric-content-registries-v0 8.0.19+b559734419
+	- fabric-convention-tags-v1 2.1.5+7f945d5b19
+	- fabric-convention-tags-v2 2.11.1+a406e79519
+	- fabric-crash-report-info-v1 0.2.29+0af3f5a719
+	- fabric-data-attachment-api-v1 1.4.5+6116a37819
+	- fabric-data-generation-api-v1 20.2.33+37516cd619
+	- fabric-dimensions-v1 4.0.0+6fc22b9919
+	- fabric-entity-events-v1 1.8.0+2b27e0a419
+	- fabric-events-interaction-v0 0.7.13+ba9dae0619
+	- fabric-game-rule-api-v1 1.0.53+6ced4dd919
+	- fabric-gametest-api-v1 2.0.5+6fc22b9919
+	- fabric-item-api-v1 11.2.0+3b3cb2e819
+	- fabric-item-group-api-v1 4.1.7+def88e3a19
+	- fabric-lifecycle-events-v1 2.6.0+0865547519
+	- fabric-loot-api-v2 3.0.15+3f89f5a519
+	- fabric-loot-api-v3 1.0.3+3f89f5a519
+	- fabric-message-api-v1 6.0.14+8aaf3aca19
+	- fabric-networking-api-v1 4.3.0+c7469b2119
+	- fabric-object-builder-api-v1 15.2.1+40875a9319
+	- fabric-particles-v1 4.0.2+6573ed8c19
+	- fabric-recipe-api-v1 5.0.14+248df81c19
+	- fabric-registry-sync-v0 5.3.1+e3eddc2119
+	- fabric-rendering-data-attachment-v1 0.3.49+73761d2e19
+	- fabric-rendering-fluids-v1 3.1.6+1daea21519
+	- fabric-resource-conditions-api-v1 4.3.0+8dc279b119
+	- fabric-resource-loader-v0 1.3.1+5b5275af19
+	- fabric-screen-handler-api-v1 1.3.90+b559734419
+	- fabric-transfer-api-v1 5.4.3+c24bd99419
+	- fabric-transitive-access-wideners-v1 6.2.0+45b9699719
+	- fabricloader 0.16.9
+	- java 21
+	- minecraft 1.21.1
+	- mixinextras 0.4.1
+	- worldforge 0.1.1
+[11:39:46] [main/INFO] (FabricLoader/Mixin) SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/C:/Users/888/.gradle/caches/modules-2/files-2.1/net.fabricmc/sponge-mixin/0.15.4+mixin.0.8.7/6a12aacc794f1078458433116e9ed42c1cc98096/sponge-mixin-0.15.4+mixin.0.8.7.jar Service=Knot/Fabric Env=SERVER
+[11:39:47] [main/INFO] (FabricLoader/Mixin) Loaded Fabric development mappings for mixin remapper!
+[11:39:48] [main/INFO] (FabricLoader/Mixin) Compatibility level set to JAVA_17
+[11:39:49] [main/INFO] (FabricLoader/MixinExtras|Service) Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.4.1).
+[11:40:15] [main/INFO] (worldforge) WorldForge worldforge initialising (MVP 0.1)
+[11:40:15] [main/INFO] (worldforge) [WorldForge] registered exactly one native item: worldforge:dynamic_item
+[11:40:15] [main/INFO] (worldforge) [WorldForge] event listeners registered (once)
+[11:40:15] [main/INFO] (worldforge) WorldForge ready: 1 native dynamic item, 15 pre-baked appearance slots
+[11:40:15] [main/ERROR] (Minecraft) Failed to load properties from file: server.properties
+java.nio.file.NoSuchFileException: server.properties
+	at java.base/sun.nio.fs.WindowsException.translateToIOException(WindowsException.java:85) ~[?:?]
+	at java.base/sun.nio.fs.WindowsException.rethrowAsIOException(WindowsException.java:103) ~[?:?]
+	at java.base/sun.nio.fs.WindowsException.rethrowAsIOException(WindowsException.java:108) ~[?:?]
+	at java.base/sun.nio.fs.WindowsFileSystemProvider.newByteChannel(WindowsFileSystemProvider.java:234) ~[?:?]
+	at java.base/java.nio.file.Files.newByteChannel(Files.java:380) ~[?:?]
+	at java.base/java.nio.file.Files.newByteChannel(Files.java:432) ~[?:?]
+	at java.base/java.nio.file.spi.FileSystemProvider.newInputStream(FileSystemProvider.java:420) ~[?:?]
+	at java.base/java.nio.file.Files.newInputStream(Files.java:160) ~[?:?]
+	at knot/net.minecraft.server.dedicated.AbstractPropertiesHandler.loadProperties(AbstractPropertiesHandler.java:62) [minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.server.dedicated.ServerPropertiesHandler.load(ServerPropertiesHandler.java:141) [minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.server.dedicated.ServerPropertiesLoader.<init>(ServerPropertiesLoader.java:12) [minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.server.Main.main(Main.java:114) [minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at net.fabricmc.loader.impl.game.minecraft.MinecraftGameProvider.launch(MinecraftGameProvider.java:480) [fabric-loader-0.16.9.jar:?]
+	at net.fabricmc.loader.impl.launch.knot.Knot.launch(Knot.java:74) [fabric-loader-0.16.9.jar:?]
+	at net.fabricmc.loader.impl.launch.knot.KnotServer.main(KnotServer.java:23) [fabric-loader-0.16.9.jar:?]
+	at net.fabricmc.devlaunchinjector.Main.main(Main.java:86) [dev-launch-injector-0.2.1+build.8.jar:?]
+[11:40:16] [main/WARN] (Minecraft) Failed to load eula.txt
+[11:40:16] [main/INFO] (Minecraft) Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, name=PROD]
+[11:40:16] [main/INFO] (FabricGameTestHelper) Starting test server
+[11:40:22] [main/INFO] (Minecraft) Loaded 1291 recipes
+[11:40:23] [main/INFO] (Minecraft) Loaded 1400 advancements
+[11:40:24] [main/INFO] (BiomeModificationImpl) Applied 0 biome modifications to 0 of 64 new biomes in 2.832 ms
+[11:40:25] [Server thread/INFO] (Minecraft) Preparing start region for dimension minecraft:overworld
+[11:40:25] [Worker-Main-12/INFO] (Minecraft) Preparing spawn area: 2%
+[11:40:26] [Worker-Main-2/INFO] (Minecraft) Preparing spawn area: 18%
+[11:40:26] [Server thread/INFO] (Minecraft) Time elapsed: 720 ms
+[11:40:26] [Server thread/INFO] (Minecraft) Started game test server
+[11:40:26] [Server thread/INFO] (worldforge) [WorldForge] loaded 0 definitions for world E:\javas\wf-011\build\run\gameTest\.\world\.\worldforge
+[11:40:26] [Server thread/INFO] (Minecraft) 16 tests are now running at position -10626342, -59, -5010637!
+[11:40:28] [Server thread/INFO] (Minecraft) Running test batch 'worldforge-regression:0' (8 tests)...
+[11:40:28] [Server thread/INFO] (Minecraft) [                ]
+[11:40:28] [Server thread/WARN] (worldforge) [WorldForge] create worldforge:r1_fail: no behaviors defined; item is decorative only
+[11:40:28] [Server thread/ERROR] (worldforge) [WorldForge] FAILED to save definitions (previous file kept): java.nio.file.AccessDeniedException: C:\Windows\TEMP\wf-r113885419856170577509\items.json.tmp -> C:\Windows\TEMP\wf-r113885419856170577509\items.json
+[11:40:28] [Server thread/ERROR] (worldforge) [WorldForge] mutation 'create worldforge:r1_fail' rolled back because persistence failed
+[11:40:28] [Server thread/WARN] (worldforge) [WorldForge] create worldforge:r1b_good: no behaviors defined; item is decorative only
+[11:40:28] [Server thread/WARN] (worldforge) [WorldForge] create worldforge:r1b_bad: no behaviors defined; item is decorative only
+[11:40:28] [Server thread/ERROR] (worldforge) [WorldForge] FAILED to save definitions (previous file kept): java.nio.file.AccessDeniedException: C:\Windows\TEMP\wf-r1b8007491721643115071\items.json.tmp -> C:\Windows\TEMP\wf-r1b8007491721643115071\items.json
+[11:40:28] [Server thread/ERROR] (worldforge) [WorldForge] mutation 'create worldforge:r1b_bad' rolled back because persistence failed
+[11:40:28] [Server thread/WARN] (worldforge) [WorldForge] create worldforge:r2_item: no behaviors defined; item is decorative only
+[11:40:28] [Server thread/WARN] (worldforge) [WorldForge] create worldforge:r3_sword: no behaviors defined; item is decorative only
+[11:40:29] [Server thread/INFO] (Minecraft) test-mock-player[embedded] logged in with entity id 1 at (9.5, -60.0, -0.5)
+[11:40:29] [Server thread/INFO] (Minecraft) test-mock-player joined the game
+[11:40:30] [Server thread/WARN] (Minecraft) Can't keep up! Is the server overloaded? Running 2680ms or 53 ticks behind
+[11:40:30] [Server thread/WARN] (worldforge) [WorldForge] create worldforge:r6_synced: no behaviors defined; item is decorative only
+[11:40:30] [Server thread/WARN] (worldforge) [WorldForge] create worldforge:r6_gone: no behaviors defined; item is decorative only
+[11:40:30] [Server thread/INFO] (Minecraft) test-mock-player[embedded] logged in with entity id 4 at (-1.5, -60.0, 10.5)
+[11:40:30] [Server thread/INFO] (Minecraft) test-mock-player joined the game
+[11:40:30] [Server thread/INFO] (Minecraft) test-mock-player lost connection: r6 done
+[11:40:30] [Server thread/INFO] (Minecraft) test-mock-player left the game
+[11:40:30] [Server thread/WARN] (worldforge) [WorldForge] create worldforge:r8_live: no behaviors defined; item is decorative only
+[11:40:30] [Server thread/ERROR] (worldforge) [WorldForge] definitions file unreadable: com.google.gson.JsonSyntaxException: com.google.gson.stream.MalformedJsonException: Expected name at line 1 column 2 path $.
+[11:40:30] [Server thread/WARN] (worldforge) [WorldForge] damaged definitions file preserved at C:\Windows\TEMP\wf-r816208303769453587445\items.json.broken-1792208430818
+[11:40:30] [Server thread/INFO] (worldforge) [WorldForge] reloaded 0 definitions
+[11:40:30] [Server thread/ERROR] (FabricGameTestHelper) Exception occurred when invoking test method testR8_reloadOnCorruptFilePreservesState in (dev.worldforge.test.WorldForgeGameTests)
+java.lang.reflect.InvocationTargetException: null
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:118) ~[?:?]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[?:?]
+	at knot/net.fabricmc.fabric.impl.gametest.FabricGameTestHelper.invokeTestMethod(FabricGameTestHelper.java:115) ~[fabric-gametest-api-v1-652de5e3-common-2.0.5+6fc22b9919.jar:?]
+	at knot/net.fabricmc.fabric.impl.gametest.FabricGameTestHelper.lambda$getTestMethodInvoker$1(FabricGameTestHelper.java:108) ~[fabric-gametest-api-v1-652de5e3-common-2.0.5+6fc22b9919.jar:?]
+	at knot/net.minecraft.test.TestFunction.start(TestFunction.java:22) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.test.GameTestState.start(GameTestState.java:182) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.test.GameTestState.tickTests(GameTestState.java:146) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.test.GameTestState.tick(GameTestState.java:129) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.test.TestManager.method_56242(TestManager.java:42) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at java.base/java.util.concurrent.CopyOnWriteArrayList.forEach(CopyOnWriteArrayList.java:891) ~[?:?]
+	at knot/net.minecraft.test.TestManager.tick(TestManager.java:42) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.server.MinecraftServer.handler$zzc000$fabric-gametest-api-v1$tickWorlds(MinecraftServer.java:2132) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.server.MinecraftServer.tickWorlds(MinecraftServer.java:1034) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.server.MinecraftServer.tick(MinecraftServer.java:912) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.test.TestServer.tick(TestServer.java:159) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.server.MinecraftServer.runServer(MinecraftServer.java:697) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/net.minecraft.server.MinecraftServer.method_29739(MinecraftServer.java:281) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at java.base/java.lang.Thread.run(Thread.java:1583) [?:?]
+Caused by: net.minecraft.test.GameTestException: corrupt-file reload must NOT wipe live definitions (count was 0)
+	at knot/net.minecraft.test.TestContext.assertTrue(TestContext.java:909) ~[minecraft-common-48f5f74c97-1.21.1-net.fabricmc.yarn.1_21_1.1.21.1+build.3-v2.jar:?]
+	at knot/dev.worldforge.test.WorldForgeGameTests.testR8_reloadOnCorruptFilePreservesState(WorldForgeGameTests.java:581) ~[main/:?]
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[?:?]
+	... 17 more
+[11:40:30] [Server thread/ERROR] (Minecraft) worldforgegametests.testr8_reloadoncorruptfilepreservesstate failed at -10626251, -60, -5010637! corrupt-file reload must NOT wipe live definitions (count was 0)
+[11:40:31] [Server thread/INFO] (Minecraft) Running test batch 'worldforge:0' (7 tests)...
+[11:40:31] [Server thread/INFO] (Minecraft) [+++++++X        ]
+[11:40:31] [Server thread/INFO] (Minecraft) [+++++++X        ]
+[11:40:31] [Server thread/INFO] (Minecraft) [+++++++X        ]
+[11:40:31] [Server thread/INFO] (Minecraft) [+++++++X        ]
+[11:40:31] [Server thread/INFO] (Minecraft) [+++++++X        ]
+[11:40:31] [Server thread/INFO] (Minecraft) [+++++++X        ]
+[11:40:31] [Server thread/INFO] (Minecraft) [+++++++X        ]
+[11:40:31] [Server thread/INFO] (worldforge) [WorldForge] reloaded 1 definitions
+[11:40:31] [Server thread/INFO] (Minecraft) [+++++++X+++++   ]
+[11:40:32] [Server thread/INFO] (worldforge) [WorldForge] reloaded 10 definitions
+[11:40:32] [Server thread/INFO] (worldforge) [WorldForge] reloaded 10 definitions
+[11:40:32] [Server thread/INFO] (worldforge) [WorldForge] reloaded 10 definitions
+[11:40:32] [Server thread/INFO] (Minecraft) Running test batch 'worldforge-persist:0' (1 tests)...
+[11:40:32] [Server thread/INFO] (Minecraft) [+++++++X+++++++ ]
+[11:40:32] [Server thread/INFO] (worldforge) [WorldForge] loaded 0 definitions for world E:\javas\wf-011\build\run\gameTest\.\world\.\worldforge
+[11:40:32] [Server thread/WARN] (worldforge) [WorldForge] create worldforge:persist_real: no behaviors defined; item is decorative only
+[11:40:32] [Server thread/INFO] (worldforge) [WorldForge] reloaded 1 definitions
+[11:40:32] [Server thread/INFO] (Minecraft) [+++++++X++++++++]
+[11:40:32] [Server thread/INFO] (Minecraft) ========= 16 GAME TESTS COMPLETE IN 6.140 s ======================
+[11:40:32] [Server thread/INFO] (Minecraft) 1 required tests failed :(
+[11:40:32] [Server thread/INFO] (Minecraft)    - worldforgegametests.testr8_reloadoncorruptfilepreservesstate
+[11:40:32] [Server thread/INFO] (Minecraft) ====================================================
+[11:40:32] [Server thread/INFO] (Minecraft) Stopping server
+[11:40:32] [Server thread/INFO] (Minecraft) Saving players
+[11:40:32] [Server thread/INFO] (Minecraft) test-mock-player lost connection: Server closed
+[11:40:32] [Server thread/INFO] (Minecraft) test-mock-player left the game
+[11:40:32] [Server thread/INFO] (Minecraft) Saving worlds
+[11:40:33] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[Test Level]'/minecraft:overworld
+[11:40:37] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[Test Level]'/minecraft:the_nether
+[11:40:37] [Server thread/INFO] (Minecraft) Saving chunks for level 'ServerLevel[Test Level]'/minecraft:the_end
+[11:40:37] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (world): All chunks are saved
+[11:40:37] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[11:40:37] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[11:40:37] [Server thread/INFO] (Minecraft) ThreadedAnvilChunkStorage: All dimensions are saved
+[11:40:37] [Server thread/INFO] (Minecraft) Game test server shutting down
+
+> Task :runGameTest FAILED
+
+[Incubating] Problems report is available at: file:///E:/javas/wf-011/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':runGameTest'.
+> Process 'command 'C:\Users\888\.jdks\ms-21.0.10\bin\java.exe'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 2m 54s
+6 actionable tasks: 6 executed

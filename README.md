@@ -1,4 +1,4 @@
-# WorldForge — Minecraft 运行时动态物品引擎 (MVP 0.1 / v0.1.1)
+# WorldForge — Minecraft 运行时动态物品引擎 (MVP 0.1 / v0.1.2)
 
 [![build](https://img.shields.io/badge/build-passing-brightgreen)]() [![MC](https://img.shields.io/badge/Minecraft-1.21.1-green)]() [![Loader](https://img.shields.io/badge/Fabric-Loader%200.16.9-blue)]()
 
@@ -102,6 +102,18 @@ src/main/resources/
 
 **6. 失效状态**
 删除定义后，存量堆保留虚拟 ID 但获得 tombstone：名称显示 `§6[已失效]§r xxx`、tooltip 红字说明、右键返回 FAIL 并提示，不崩溃、不销毁物品（测试 F）。以相同 ID 重建定义后堆自动恢复功能。
+
+## 二·四、v0.1.2 深度修复迭代（3 项 P1）
+
+第二轮源码审读发现的三个问题，同样遵循"先复现 → 回归测试修复前失败 → 修复 → 全量重跑"：
+
+| # | 问题（源码路径复现） | 修复 | 回归验证 |
+|---|---|---|---|
+| 1 | **跨世界状态泄漏（P1 状态隔离）**：`resolveDefinition` 先查服务端静态 map 再查镜像；集成服务端退出只 save 不清态 → 退出单人世界 A（含 `worldforge:magic_sword`）后加入多人服 B（同名不同定义）时，客户端可能读到 A 的残留定义。风险由代码路径推断，未经真实客户端目测复现（如实标注） | 显示与逻辑彻底分道：`definitionForLogic()` 只读服务端权威态（行为分发/堆重烘）；`resolveForClientDisplay()` 只读镜像；客户端 JVM 内显示一律走镜像。新增 `SERVER_STOPPED` 时 `onServerStopped()` 清空服务端全部静态状态（定义/墓碑/store 绑定） | `testR7`（A 态释放 + B 镜像独立 + 逻辑不被镜像污染）；R5 同步强化为双向隔离断言 |
+| 2 | **同步失败被吞（P1 操作一致性）**：`broadcast()` 捕获异常仅记日志，调用方仍得 `ok=true`——把"落盘成功"与"运行时已应用/客户端已收到"混为一谈，AI Agent 无法决定重试 | `ToolResult` 拆成三段：`persisted`（磁盘事务）/ `applied`（服务端重烘堆）/ `sync`（OK/PARTIAL/FAILED/NONE），并给出 `needsRetry()`；`resync()` 提供不改定义的重驱动入口；命令层把 PARTIAL/FAILED 显式提示给玩家 | `testR9`（成功三段、磁盘失败三段全诚实、回滚值仍权威、resync 恢复） |
+| 3 | **损坏文件 reload 过激（P1 存档安全）**：`load()` 解析失败即隔离文件返回空表，`reloadDefinitions()` 先清空运行时再装载 → 运行中 `/wf reload` 遇到损坏文件会**抹掉全部当前定义**，停服还可能把空集合写回盘 | 新增无副作用 `tryLoad()`（失败返回 `LoadResult.failed`，绝不动玩家文件）；reload 走保守路径：读取失败 → 运行时保持原样 + 返回失败结果 + 文件不隔离不改动，由玩家决定恢复；世界**首次启动**路径保留原隔离行为（新会话可从干净保存开始） | `testR8` 在 **v0.1.1 真实服务端上先行运行得到 FAILED**（`corrupt-file reload must NOT wipe live definitions (count was 0)`，日志存档 `docs/evidence-r8-failed-on-v0.1.1.log`），修复后 PASSED；`testR10` 断言 tryLoad 零副作用 |
+
+**GameTest 总数升至 19 项（旧 15 + R7/R8/R9/R10），全部在真实专用服务端通过。**
 
 ## 二·五、v0.1.1 修复迭代（严格 triage）
 
