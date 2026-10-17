@@ -3,7 +3,7 @@
 	"id": "worldforge",
 	"version": "${version}",
 	"name": "WorldForge",
-	"description": "Runtime dynamic item engine for Minecraft - create, modify and delete virtual items without restarting the game. v0.2.0: + in-game visual editor (WorldForge Studio) with server-validated protocol.",
+	"description": "Runtime dynamic item engine for Minecraft - create, modify and delete virtual items without restarting the game. v0.3.0: + AI AgentBridge - natural-language item creation with two-phase server-validated proposals.",
 	"authors": [
 		"MUERJUN"
 	],
