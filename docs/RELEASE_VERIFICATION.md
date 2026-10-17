@@ -23,6 +23,17 @@ sha256sum build/libs/worldforge-X.Y.Z.jar build/libs/worldforge-X.Y.Z-sources.ja
 `reproducibleFileOrder=true`，配合 `.gitattributes` 强制 `eol=lf`），
 因此不同机器 / 不同时间的干净构建应得到相同哈希。
 
+## v0.3.2 发布产物 SHA-256
+
+| 产物 | SHA-256 |
+|---|---|
+| worldforge-0.3.2.jar | `3c6bd7209c636dd743b29bccbc47f54d52a84c355c364cc9fd1734c5a3a961f2` |
+| worldforge-0.3.2-sources.jar | `2ea1a9b2a30caab3c0491e7aab593baf6cfcf3cf2c41011ff7a7e8759a71bbf6` |
+
+GUI 证据：`docs/screenshots/v032-*.png`（真实客户端帧缓冲）、`docs/v032-client-autotest-report.txt`（逐项断言）、`tools/sharpness_check.py`（清晰度量化）。
+
+---
+
 ## v0.3.1 发布产物 SHA-256
 
 | 产物 | SHA-256 |
