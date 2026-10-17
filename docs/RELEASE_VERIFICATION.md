@@ -23,6 +23,20 @@ sha256sum build/libs/worldforge-0.1.1.jar build/libs/worldforge-0.1.1-sources.ja
 `reproducibleFileOrder=true`，配合 `.gitattributes` 强制 `eol=lf`），
 因此不同机器 / 不同时间的干净构建应得到相同哈希。
 
+## v0.1.2 发布产物 SHA-256
+
+（v0.1.2 代码 commit `cdd1091` 之后仅行尾 renormalize，工作区与 tag 独立构建字节一致，见下）
+
+| 产物 | SHA-256 |
+|---|---|
+| worldforge-0.1.2.jar | `e601ff49ba64a360cd7253e705670c0da1e4941c88675cbe4d23da4358dfc477` |
+| worldforge-0.1.2-sources.jar | `4c96f6650bcd3152b7d69be1ae325d73834b455d6025c28f14aa9a7ac381430b` |
+
+独立核查（2026-10-17）：全新克隆检出 v0.1.2 -> `clean build` -> 上表哈希与工作区构建一致；
+该克隆直接 `runGameTest` -> All 19 required tests passed。
+
+---
+
 ## v0.1.1 发布产物 SHA-256
 
 最后一个改变 JAR 内容的代码 commit 为 `053be25`（其后的提交仅文档，构建字节
