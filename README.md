@@ -137,8 +137,9 @@ src/main/resources/
 | R3 | 删除定义后存量堆不得残留攻击加成（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过（修复前 FAILED 留档） |
 | R4 | 治疗/冷却/速度效果/经验/闪电在真实 mock 玩家身上生效（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过 |
 | R5 | S2C payload 线级编解码往返 + 纯客户端镜像显示路径（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过 |
+| R6 | 多人同步（服务端半程）：真实加入玩家的同步快照经线级 codec 后镜像含定义+墓碑，发送路径不抛错（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过（客户端屏幕渲染仍需人工 runClient 目测） |
 
-> 汇总：v0.1.1 `runGameTest` 输出 **All 14 required tests passed**（旧 8 项 + 新 6 项回归/端到端）。
+> 汇总：v0.1.1 `runGameTest` 输出 **All 15 required tests passed**（旧 8 项 + 新 7 项回归/端到端）。
 > R1/R1b/R2/R3 在 v0.1.0 代码上运行得到 **FAILED**（错误信息与上表逐条对应），修复后转 **PASSED** —— 回归有效性已实证。
 > **已在真实 Minecraft 专用服务端（Fabric + Yarn 映射）验证**；下列“未验证清单”如实列出尚未人工确认的内容。
 
