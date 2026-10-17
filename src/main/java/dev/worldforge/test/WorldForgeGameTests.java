@@ -499,6 +499,63 @@ public class WorldForgeGameTests {
 		ctx.complete();
 	}
 
+	// ---- Test R6 (issue #5, multiplayer sync half): server snapshot for a
+	// joined player carries the FULL authoritative truth (defs + tombstones)
+	// through the exact wire codec the network send path uses.
+	// (client screen rendering still needs manual runClient; see README)
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-regression")
+	public void testR6_multiplayerSyncSnapshotWire(TestContext ctx) {
+		java.nio.file.Path dir;
+		try {
+			dir = Files.createTempDirectory("wf-r6");
+		} catch (Exception e) {
+			throw new RuntimeException("setup", e);
+		}
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+		ctx.assertTrue(WorldForgeRuntimeManager.createItem(new ItemDefinition(ItemDefinition.CURRENT_VERSION,
+				"worldforge:r6_synced", "R6同步物品", "", TextureSource.vanilla("minecraft:item/emerald"),
+				Map.of("damage", 2.0, "max_durability", 10.0), List.of())).ok(), "create synced");
+		// create-then-delete so a tombstone must ride along in the snapshot
+		ctx.assertTrue(WorldForgeRuntimeManager.createItem(new ItemDefinition(ItemDefinition.CURRENT_VERSION,
+				"worldforge:r6_gone", "R6已删", "", TextureSource.vanilla("minecraft:item/diamond"),
+				Map.of("damage", 1.0, "max_durability", 2.0), List.of())).ok(), "create gone");
+		ctx.assertTrue(WorldForgeRuntimeManager.deleteItem("worldforge:r6_gone").ok(), "delete gone");
+
+		// the payload the server WOULD send to each joined player right now:
+		var payload = dev.worldforge.network.WorldForgePayloads.buildSnapshot();
+
+		// run it through the REAL wire codec, exactly like ServerPlayNetworking.send does
+		io.netty.buffer.ByteBuf raw = io.netty.buffer.Unpooled.buffer();
+		net.minecraft.network.RegistryByteBuf buf =
+				new net.minecraft.network.RegistryByteBuf(raw, ctx.getWorld().getRegistryManager());
+		dev.worldforge.network.WorldForgePayloads.SyncDefinitions.CODEC.encode(buf, payload);
+		var received = dev.worldforge.network.WorldForgePayloads.SyncDefinitions.CODEC.decode(buf);
+
+		// what a connected client would therefore see:
+		dev.worldforge.runtime.ClientDefinitionMirror.clear();
+		dev.worldforge.runtime.ClientDefinitionMirror.replaceAllFromSync(
+				received.json(), received.tombstones());
+		ctx.assertTrue(dev.worldforge.runtime.ClientDefinitionMirror.get("worldforge:r6_synced") != null,
+				"client mirror must receive the live definition after wire round-trip");
+		ctx.assertTrue(dev.worldforge.runtime.ClientDefinitionMirror.isMissing("worldforge:r6_gone"),
+				"client mirror must receive the tombstone after wire round-trip");
+		ItemStack shown = new ItemStack(WorldForgeItems.DYNAMIC_ITEM, 1);
+		shown.set(dev.worldforge.component.WorldForgeComponents.VIRTUAL_ID,
+				new dev.worldforge.component.VirtualId("worldforge:r6_synced"));
+		ctx.assertTrue(shown.getName().getString().contains("R6同步物品"),
+					"post-sync display uses wired data: " + shown.getName().getString());
+
+		// send path must not throw for a live (mock) connection either
+		net.minecraft.server.network.ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		try {
+			dev.worldforge.network.WorldForgePayloads.syncTo(player); // no-op-safe for non-WF client
+		} finally {
+			player.networkHandler.disconnect(net.minecraft.text.Text.literal("r6 done"));
+		}
+		dev.worldforge.runtime.ClientDefinitionMirror.clear();
+		ctx.complete();
+	}
+
 	// ---- helpers ----
 
 	private static double attributeValue(ItemStack stack, Identifier modifierId) {

@@ -44,14 +44,19 @@ public final class WorldForgePayloads {
 		PayloadTypeRegistry.playS2C().register(SyncDefinitions.ID, SyncDefinitions.CODEC);
 	}
 
+	/** Build the exact payload the server would broadcast right now. */
+	public static SyncDefinitions buildSnapshot() {
+		return new SyncDefinitions(
+				DefinitionStore.toJsonString(WorldForgeRuntimeManager.list()),
+				List.copyOf(WorldForgeRuntimeManager.tombstones()));
+	}
+
 	/** Send the current definition snapshot to one player (no-op for vanilla clients). */
 	public static void syncTo(net.minecraft.server.network.ServerPlayerEntity player) {
 		if (!ServerPlayNetworking.canSend(player, SyncDefinitions.ID)) {
 			return;
 		}
-		ServerPlayNetworking.send(player, new SyncDefinitions(
-				DefinitionStore.toJsonString(WorldForgeRuntimeManager.list()),
-				List.copyOf(WorldForgeRuntimeManager.tombstones())));
+		ServerPlayNetworking.send(player, buildSnapshot());
 	}
 
 	/** Sync to all connected players (after create/update/delete/reload/join). */

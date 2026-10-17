@@ -35,6 +35,7 @@ public final class WorldForgeEvents {
 		// push the definition snapshot so client tooltips/names resolve.
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
 			DynamicItem.refreshAllIn(handler.player.getInventory());
+			DynamicItem.refreshStack(handler.player.playerScreenHandler.getCursorStack());
 			WorldForgePayloads.syncTo(handler.player);
 		});
 
