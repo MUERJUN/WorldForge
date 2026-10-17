@@ -114,6 +114,100 @@ public class WorldForgeV012Tests {
 		ctx.complete();
 	}
 
+
+	// ---- Test R11 (v0.2.0 stage-1 P1): reload must reject PARTIALLY damaged
+	// files. A file where one entry parses and one is broken currently passes
+	// tryLoad() silently -> reload replaces runtime with the good subset ->
+	// next save permanently drops the damaged record (silent data loss).
+	// Strict reload must refuse to overwrite in that case and keep live state.
+	// (Written before the fix: FAILS on v0.1.2 code.)
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-v020")
+	public void testR11_strictReloadRejectsPartialDamage(TestContext ctx) {
+		java.nio.file.Path dir;
+		try {
+			dir = Files.createTempDirectory("wf-r11");
+		} catch (Exception e) {
+			throw new RuntimeException("setup", e);
+		}
+		DefinitionStore store = new DefinitionStore(dir);
+		WorldForgeRuntimeManager.attachStoreForTesting(store);
+		// live runtime has an item; the create below saves it to disk first...
+		ctx.assertTrue(WorldForgeRuntimeManager.createItem(new ItemDefinition(ItemDefinition.CURRENT_VERSION,
+				"worldforge:r11_live_only", "仅活动", "", TextureSource.vanilla("minecraft:item/diamond"),
+				Map.of("damage", 3.0, "max_durability", 10.0), List.of())).ok(), "live create");
+		// ...THEN the file is externally damaged: one GOOD entry that does NOT
+		// include the live item + one BROKEN entry (missing id).
+		try {
+			Files.writeString(dir.resolve("items.json"), """
+					{"version":1,"items":[
+					  {"version":1,"id":"worldforge:r11_ok","name":"好条目"},
+					  {"no_id_field":true}
+					]}""");
+		} catch (Exception e) {
+			throw new RuntimeException("damage", e);
+		}
+
+		int n = WorldForgeRuntimeManager.reloadDefinitions();
+		// STRICT reload (v0.2.0): any malformed entry aborts the whole replace
+		ctx.assertTrue(n < 0, "reload with a partially damaged file must FAIL, got count " + n);
+		ctx.assertTrue(WorldForgeRuntimeManager.get("worldforge:r11_live_only") != null,
+				"live-only definition must survive an aborted strict reload");
+		// the player file must be untouched
+		try {
+			String after = Files.readString(dir.resolve("items.json"));
+			ctx.assertTrue(after.contains("no_id_field"),
+					"strict reload must not rewrite the player's file");
+			// and any later save must not silently drop the damaged record either:
+			// (state preserved => save persists the preserved state, file still on disk untouched until then)
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+		ctx.complete();
+	}
+
+	// ---- Test R12: missing "items" field is NOT a legit empty project on the
+	// strict path; version newer than supported is rejected ----
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-v020")
+	public void testR12_strictLoadRejectsShapes(TestContext ctx) {
+		try {
+			java.nio.file.Path d1 = Files.createTempDirectory("wf-r12a");
+			Files.writeString(d1.resolve("items.json"), "{\"version\":1}");
+			var r1 = new DefinitionStore(d1).tryLoadStrict();
+			ctx.assertTrue(!r1.ok(), "missing items array must be rejected strictly");
+
+			java.nio.file.Path d2 = Files.createTempDirectory("wf-r12b");
+			Files.writeString(d2.resolve("items.json"), "{\"version\":99,\"items\":[]}");
+			var r2 = new DefinitionStore(d2).tryLoadStrict();
+			ctx.assertTrue(!r2.ok(), "unsupported newer file version must be rejected strictly");
+
+			java.nio.file.Path d3 = Files.createTempDirectory("wf-r12c");
+			Files.writeString(d3.resolve("items.json"), """
+					{"version":1,"items":[
+					  {"version":1,"id":"worldforge:dup","name":"A"},
+					  {"version":1,"id":"worldforge:dup","name":"B"}
+					]}""");
+			var r3 = new DefinitionStore(d3).tryLoadStrict();
+			ctx.assertTrue(!r3.ok(), "duplicate ids must be rejected strictly");
+
+			java.nio.file.Path d4 = Files.createTempDirectory("wf-r12d");
+			Files.writeString(d4.resolve("items.json"), "{\"version\":1,\"items\":[]}");
+			var r4 = new DefinitionStore(d4).tryLoadStrict();
+			ctx.assertTrue(r4.ok() && r4.definitions().isEmpty(),
+					"a genuinely empty project stays valid");
+
+			java.nio.file.Path d5 = Files.createTempDirectory("wf-r12e");
+			Files.writeString(d5.resolve("items.json"), """
+					{"version":1,"items":[
+					  {"version":1,"id":"worldforge:badtype","attributes":{"damage":"NaN-string"}}
+					]}""");
+			var r5 = new DefinitionStore(d5).tryLoadStrict();
+			ctx.assertTrue(!r5.ok(), "wrong field types must be rejected strictly");
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+		ctx.complete();
+	}
+
 	// ---- Test R10 (issue #3): store-level non-destructive load ----
 	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-v012")
 	public void testR10_tryLoadNeverQuarantines(TestContext ctx) {

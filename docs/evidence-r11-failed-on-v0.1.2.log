@@ -1,0 +1,4 @@
+[12:15:18] [Server thread/ERROR] (Minecraft) worldforgev012tests.testr11_strictreloadrejectspartialdamage failed at -12003796, -60, 1081363! reload with a partially damaged file must FAIL, got count 1
+[12:15:18] [Server thread/INFO] (Minecraft) ========= 20 GAME TESTS COMPLETE IN 2.857 s ======================
+[12:15:18] [Server thread/INFO] (Minecraft) 1 required tests failed :(
+[12:15:18] [Server thread/INFO] (Minecraft)    - worldforgev012tests.testr11_strictreloadrejectspartialdamage

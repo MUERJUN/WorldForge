@@ -192,7 +192,24 @@ public final class WorldForgeRuntimeManager {
 		store = new DefinitionStore(dir);
 		loadedWorldKey = worldKey;
 		int n = 0;
-		for (ItemDefinition def : store.load()) {
+		// v0.2.0 stage-1: first-start prefers the STRICT read; if the file has
+		// any anomaly we salvage what we can (lenient), QUARANTINE the original
+		// file as a backup, and log every dropped entry loudly - never a
+		// silent loss, and the salvage backup prevents a later save from
+		// overwriting unrecoverable bytes.
+		List<ItemDefinition> toLoad;
+		var strict = store.tryLoadStrict();
+		if (strict.ok()) {
+			toLoad = strict.definitions();
+		} else {
+			var salvage = store.tryLoadLenient();
+			toLoad = salvage.definitions();
+			store.quarantine();
+			WorldForge.LOGGER.error("[WorldForge] definitions file damaged ({}) - salvaged {} entries, "
+					+ "original preserved as backup; skipped: {}", strict.error(), toLoad.size(), salvage.skipped());
+			salvage.skipped().forEach(sk -> WorldForge.LOGGER.error("[WorldForge]  LOST ENTRY: {}", sk));
+		}
+		for (ItemDefinition def : toLoad) {
 			DefinitionValidator.Result v = DefinitionValidator.validate(def);
 			if (!v.ok()) {
 				WorldForge.LOGGER.warn("[WorldForge] skipping invalid stored definition {}: {}", def.id(), v.errors());
@@ -250,7 +267,7 @@ public final class WorldForgeRuntimeManager {
 		if (s == null) {
 			return new ReloadOutcome(false, -1, "当前世界尚未绑定存储");
 		}
-		DefinitionStore.LoadResult loaded = s.tryLoad();
+		DefinitionStore.LoadResult loaded = s.tryLoadStrict();
 		if (!loaded.ok()) {
 			WorldForge.LOGGER.error("[WorldForge] reload ABORTED, live definitions kept: {}", loaded.error());
 			return new ReloadOutcome(false, -2, "读取定义失败，已保留当前运行时定义（文件未改动）: " + loaded.error());

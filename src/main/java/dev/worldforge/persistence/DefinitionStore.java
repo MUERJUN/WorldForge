@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Per-world JSON file store for item definitions.
@@ -109,8 +110,147 @@ public final class DefinitionStore {
 		return LoadResult.ok(out);
 	}
 
+	/**
+	 * STRICT parse (v0.2.0 stage-1, closes v0.1.2 P1 silent partial loss):
+	 * ANY anomaly aborts the WHOLE load instead of skipping entries -
+	 * missing "items" field, unsupported newer version, non-object entries,
+	 * broken records, duplicate ids, wrong field types. Callers must keep
+	 * live runtime state on failure and must NOT rewrite the player's file.
+	 * Distinguishes: no file (valid empty) / empty items (valid empty) /
+	 * everything else that is not exactly well-formed => failed with cause.
+	 */
+	public LoadResult tryLoadStrict() {
+		if (!exists()) {
+			return LoadResult.ok(List.of()); // fresh world: legit empty project
+		}
+		JsonElement root;
+		try {
+			String text = Files.readString(file, StandardCharsets.UTF_8);
+			root = JsonParser.parseString(text);
+		} catch (Exception e) {
+			return LoadResult.failed("unreadable definitions file: " + e);
+		}
+		if (!root.isJsonObject()) {
+			return LoadResult.failed("definitions file is not a JSON object");
+		}
+		JsonObject obj = root.getAsJsonObject();
+		int version = obj.has("version") && obj.get("version").isJsonPrimitive()
+				? obj.get("version").getAsInt() : -1;
+		if (version < 0) {
+			return LoadResult.failed("missing or invalid \"version\" field");
+		}
+		if (version > FILE_VERSION) {
+			return LoadResult.failed("file version " + version + " is newer than supported " + FILE_VERSION);
+		}
+		if (!obj.has("items")) {
+			return LoadResult.failed("missing \"items\" field (refusing to treat a possibly damaged file as an empty project)");
+		}
+		if (!obj.get("items").isJsonArray()) {
+			return LoadResult.failed("\"items\" is not an array");
+		}
+		List<ItemDefinition> out = new ArrayList<>();
+		Set<String> seen = new java.util.HashSet<>();
+		int idx = 0;
+		for (JsonElement el : obj.getAsJsonArray("items")) {
+			idx++;
+			if (!el.isJsonObject()) {
+				return LoadResult.failed("entry #" + idx + " is not an object");
+			}
+			ItemDefinition def;
+			try {
+				def = fromJson(el.getAsJsonObject());
+			} catch (Exception e) {
+				return LoadResult.failed("entry #" + idx + " is invalid: " + e);
+			}
+			if (!seen.add(def.id())) {
+				return LoadResult.failed("duplicate id \"" + def.id() + "\" at entry #" + idx);
+			}
+			// strict also rejects values the tolerant path silently clamped away
+			if (!def.id().matches("[a-z0-9_.-]+:[a-z0-9_.-/]+")) {
+				return LoadResult.failed("entry #" + idx + " has an illegal id: " + def.id());
+			}
+			// strict raw-shape check: types the lenient path would silently drop
+			JsonObject raw = el.getAsJsonObject();
+			if (raw.has("attributes")) {
+				if (!raw.get("attributes").isJsonObject()) {
+					return LoadResult.failed("entry #" + idx + ": \"attributes\" must be an object");
+				}
+				for (var e2 : raw.getAsJsonObject("attributes").entrySet()) {
+					if (!e2.getValue().isJsonPrimitive() || !e2.getValue().getAsJsonPrimitive().isNumber()) {
+						return LoadResult.failed("entry #" + idx + ": attribute \"" + e2.getKey()
+								+ "\" must be a number, got " + e2.getValue());
+					}
+				}
+			}
+			for (String key : new String[]{"name", "description"}) {
+				if (raw.has(key) && (!raw.get(key).isJsonPrimitive() || !raw.get(key).getAsJsonPrimitive().isString())) {
+					return LoadResult.failed("entry #" + idx + ": field \"" + key + "\" must be a string");
+				}
+			}
+			out.add(def);
+		}
+		return LoadResult.ok(out);
+	}
+
+	/**
+	 * Lenient best-effort parse with an EXPLICIT skip report (used only for
+	 * world first-start recovery). Returns the definitions that could be
+	 * salvaged AND the reasons for every skipped entry so the caller can
+	 * warn the player loudly instead of losing records silently.
+	 */
+	public record LenientLoad(List<ItemDefinition> definitions, List<String> skipped) {
+		public boolean hadDamage() {
+			return !skipped.isEmpty();
+		}
+	}
+
+	public LenientLoad tryLoadLenient() {
+		List<String> skipped = new ArrayList<>();
+		List<ItemDefinition> out = new ArrayList<>();
+		if (!exists()) {
+			return new LenientLoad(out, skipped);
+		}
+		JsonElement root;
+		try {
+			root = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
+		} catch (Exception e) {
+			skipped.add("file unreadable: " + e);
+			return new LenientLoad(out, skipped);
+		}
+		if (!root.isJsonObject()) {
+			skipped.add("file is not a JSON object");
+			return new LenientLoad(out, skipped);
+		}
+		JsonObject obj = root.getAsJsonObject();
+		JsonArray items = obj.has("items") && obj.get("items").isJsonArray()
+				? obj.getAsJsonArray("items") : new JsonArray();
+		if (!obj.has("items")) {
+			skipped.add("missing items array");
+		}
+		int idx = 0;
+		Set<String> seen = new java.util.HashSet<>();
+		for (JsonElement el : items) {
+			idx++;
+			if (!el.isJsonObject()) {
+				skipped.add("entry #" + idx + ": not an object");
+				continue;
+			}
+			try {
+				ItemDefinition def = fromJson(el.getAsJsonObject());
+				if (!seen.add(def.id())) {
+					skipped.add("entry #" + idx + ": duplicate id " + def.id());
+					continue;
+				}
+				out.add(def);
+			} catch (Exception e) {
+				skipped.add("entry #" + idx + ": " + e);
+			}
+		}
+		return new LenientLoad(out, skipped);
+	}
+
 	/** Load all definitions for WORLD STARTUP; corrupt file is quarantined so
-	 *  the fresh session can save cleanly. (Reload must use {@link #tryLoad()}.) */
+	 *  the fresh session can save cleanly. (Reload must use {@link #tryLoadStrict()}.) */
 	public List<ItemDefinition> load() {
 		List<ItemDefinition> out = new ArrayList<>();
 		if (!exists()) {
@@ -332,5 +472,11 @@ public final class DefinitionStore {
 		} catch (IOException e) {
 			WorldForge.LOGGER.warn("[WorldForge] could not move aside damaged definitions file: {}", e.toString());
 		}
+	}
+
+	/** Public quarantine (v0.2.0 first-start salvage path): the damaged file
+	 *  is preserved under a backup name so a later save cannot overwrite it. */
+	public void quarantine() {
+		moveAside();
 	}
 }

@@ -8,13 +8,13 @@
 ```bash
 # 1. 干净检出该 tag（--no-checkout 避免复用工作树缓存）
 git clone --no-checkout <本仓库> wf-verify && cd wf-verify
-git checkout -q v0.1.1
+git checkout -q vX.Y.Z          # 例如 v0.2.0
 
 # 2. 独立构建（需 JDK 21；loom 会自建 MC 缓存）
 ./gradlew build
 
-# 3. 计算校验值（Windows/Linux 通用）
-sha256sum build/libs/worldforge-0.1.1.jar build/libs/worldforge-0.1.1-sources.jar
+# 3. 计算校验值（Windows/Linux 通用；文件名随版本变化）
+sha256sum build/libs/worldforge-X.Y.Z.jar build/libs/worldforge-X.Y.Z-sources.jar
 
 # 4. 与下表“发布产物 SHA-256”逐字节比对，应完全一致
 ```
