@@ -1,0 +1,34 @@
+{
+	"schemaVersion": 1,
+	"id": "worldforge",
+	"version": "${version}",
+	"name": "WorldForge",
+	"description": "Runtime dynamic item engine for Minecraft - create, modify and delete virtual items without restarting the game. MVP 0.1.",
+	"authors": [
+		"MUERJUN"
+	],
+	"contact": {
+		"homepage": "https://github.com/MUERJUN/WorldForge",
+		"sources": "https://github.com/MUERJUN/WorldForge"
+	},
+	"license": "MIT",
+	"icon": "assets/worldforge/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"dev.worldforge.WorldForge"
+		],
+		"client": [
+			"dev.worldforge.client.WorldForgeClient"
+		],
+		"fabric-gametest": [
+			"dev.worldforge.test.WorldForgeGameTests"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.16.0",
+		"minecraft": "~1.21.1",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}

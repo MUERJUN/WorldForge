@@ -1,0 +1,98 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "minecraft:item/stick"
+  },
+  "overrides": [
+    {
+      "predicate": {
+        "custom_model_data": 1
+      },
+      "model": "worldforge:item/wf_slot_1"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 2
+      },
+      "model": "worldforge:item/wf_slot_2"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 3
+      },
+      "model": "worldforge:item/wf_slot_3"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 4
+      },
+      "model": "worldforge:item/wf_slot_4"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 5
+      },
+      "model": "worldforge:item/wf_slot_5"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 6
+      },
+      "model": "worldforge:item/wf_slot_6"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 7
+      },
+      "model": "worldforge:item/wf_slot_7"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 8
+      },
+      "model": "worldforge:item/wf_slot_8"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9
+      },
+      "model": "worldforge:item/wf_slot_9"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 10
+      },
+      "model": "worldforge:item/wf_slot_10"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 11
+      },
+      "model": "worldforge:item/wf_slot_11"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 12
+      },
+      "model": "worldforge:item/wf_slot_12"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 13
+      },
+      "model": "worldforge:item/wf_slot_13"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 14
+      },
+      "model": "worldforge:item/wf_slot_14"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 15
+      },
+      "model": "worldforge:item/wf_slot_15"
+    }
+  ]
+}
