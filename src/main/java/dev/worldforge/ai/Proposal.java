@@ -48,6 +48,36 @@ public sealed interface Proposal {
 		}
 	}
 
+	/**
+	 * v0.4.0: block proposals are a SEPARATE type from item proposals, so a
+	 * virtual id that exists as both an item and a block can never be edited by
+	 * the wrong pipeline (spec 阶段三: 不得因虚拟 ID 相同而修改错误类型).
+	 */
+	record CreateBlock(String id, String name, String description, String appearance,
+			String category, Double hardness, Integer tickIntervalTicks,
+			String outputItemId, Integer outputCount, List<BehaviorSpec> behaviors) implements Proposal {
+		@Override
+		public String kind() {
+			return "create_block";
+		}
+	}
+
+	record UpdateBlock(String id, String name, String description, String appearance,
+			String category, Double hardness, Integer tickIntervalTicks,
+			String outputItemId, Integer outputCount) implements Proposal {
+		@Override
+		public String kind() {
+			return "update_block";
+		}
+	}
+
+	record DeleteBlock(String id) implements Proposal {
+		@Override
+		public String kind() {
+			return "delete_block";
+		}
+	}
+
 	/** read-only query answered without world mutation */
 	record Query(String what) implements Proposal {
 		@Override

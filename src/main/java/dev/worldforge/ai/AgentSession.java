@@ -25,6 +25,8 @@ public final class AgentSession {
 	private final int historyLimit;
 	/** id of the item last created/touched in this conversation - "它" resolves here */
 	private String focusItem = null;
+	/** v0.4.0: blocks are a separate focus so a shared id cannot cross types */
+	private String focusBlock = null;
 	/** monotonic per-session turn counter doubles as the model step budget */
 	private int stepsThisTurn = 0;
 
@@ -56,6 +58,16 @@ public final class AgentSession {
 
 	public void setFocusItem(String id) {
 		focusItem = id;
+		focusBlock = null; // a new item focus supersedes a block focus
+	}
+
+	public void setFocusBlock(String id) {
+		focusBlock = id;
+		focusItem = null;
+	}
+
+	public String focusBlock() {
+		return focusBlock;
 	}
 
 	public String focusItem() {
@@ -97,6 +109,25 @@ public final class AgentSession {
 		if (focusItem != null && WorldForgeRuntimeManager.get(focusItem) != null) {
 			sb.append("focus_item: ").append(focusItem).append("（“它/这个物品”默认指代）\n");
 		}
+		if (focusBlock != null && dev.worldforge.block.BlockRuntimeManager.get(focusBlock) != null) {
+			sb.append("focus_block: ").append(focusBlock).append("（“它/这个方块”默认指代）\n");
+		}
+		sb.append("=== 当前虚拟方块（服务端权威，只读上下文） ===\n");
+		var blocks = dev.worldforge.block.BlockRuntimeManager.list();
+		if (blocks.isEmpty()) {
+			sb.append("(空)\n");
+		}
+		for (var b : blocks) {
+			sb.append("- ").append(b.id()).append(" | ").append(b.name())
+					.append(" | category=").append(b.category().name().toLowerCase())
+					.append(" | appearance=").append(b.appearance());
+			if (b.periodic()) {
+				sb.append(" | every ").append(b.tickIntervalTicks()).append("t -> ")
+						.append(b.outputItemId()).append(" x").append(b.outputCount());
+			}
+			sb.append('\n');
+		}
+		sb.append("注意：物品与方块是不同类型，id 相同也不得互相修改。\n");
 		sb.append("=== 对话 ===\n");
 		for (Turn t : history) {
 			sb.append(t.user() ? "玩家: " : "AI: ").append(t.text()).append('\n');

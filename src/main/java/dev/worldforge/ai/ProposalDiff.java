@@ -71,6 +71,40 @@ public final class ProposalDiff {
 				lines.add("操作: 删除定义 " + d.id() + (cur == null ? "" : "（" + cur.name() + "）"));
 				lines.add("背包中的存量物品不会消失，将显示[已失效]标记；重建同名 ID 自动恢复");
 			}
+			case Proposal.CreateBlock b -> {
+				lines.add("操作: 创建新方块");
+				lines.add("ID: " + b.id());
+				lines.add("名称: " + b.name());
+				lines.add("外观: " + (b.appearance() == null ? "默认(stone)" : b.appearance()));
+				lines.add("类型: " + (b.category() == null ? "decoration" : b.category()));
+				if (b.tickIntervalTicks() != null) {
+					lines.add("周期: 每 " + b.tickIntervalTicks() + " tick → "
+							+ (b.outputItemId() == null ? "无产出" : b.outputItemId()));
+				}
+				describeBehaviors(b.behaviors(), lines);
+			}
+			case Proposal.UpdateBlock b -> {
+				var cur = dev.worldforge.block.BlockRuntimeManager.get(b.id());
+				lines.add("操作: 修改方块 " + b.id());
+				if (cur == null) {
+					lines.add("§c(当前方块定义不可见)");
+					return String.join("\n", lines);
+				}
+				if (b.name() != null) {
+					lines.add("名称: " + cur.name() + " → " + b.name());
+				}
+				if (b.appearance() != null) {
+					lines.add("外观: " + cur.appearance() + " → " + b.appearance());
+				}
+				if (b.tickIntervalTicks() != null) {
+					lines.add("周期: " + cur.tickIntervalTicks() + " → " + b.tickIntervalTicks() + " tick");
+				}
+				lines.add("未提及的属性保持不变；已放置的方块会立即使用新配置");
+			}
+			case Proposal.DeleteBlock b -> {
+				lines.add("操作: 删除方块定义 " + b.id());
+				lines.add("已放置的方块不会消失，将进入失效状态（可重建同名 ID 恢复）");
+			}
 			case Proposal.Query q -> lines.add("查询: " + q.what());
 		}
 		return String.join("\n", lines);

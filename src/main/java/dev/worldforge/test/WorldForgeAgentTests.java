@@ -6,6 +6,7 @@ import dev.worldforge.ai.MockModelProvider;
 import dev.worldforge.ai.Proposal;
 import dev.worldforge.definition.BehaviorDefinition;
 import dev.worldforge.definition.ItemDefinition;
+import dev.worldforge.definition.TextureSource;
 import dev.worldforge.persistence.DefinitionStore;
 import dev.worldforge.runtime.WorldForgeRuntimeManager;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -307,6 +308,136 @@ public class WorldForgeAgentTests {
 			disconnectQuiet(op);
 			ctx.assertTrue(false, "unexpected: " + t);
 			ctx.complete();
+		}
+	}
+
+	/**
+	 * A13 (v0.4.0): AI block proposals go through validation, preview, player
+	 * confirmation and the BLOCK tool layer - never the item pipeline - and an
+	 * item/block id collision cannot cross types.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-ai-block-a13")
+	public void testA13_blockProposalFlow(TestContext ctx) {
+		var dir = tempDir("wf-a13");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+		// bind a real store: the block manager refuses to report success without one
+		dev.worldforge.block.BlockRuntimeManager.attachStoreForTesting(
+				new dev.worldforge.block.BlockDefinitionStore(tempDir("wf-a13b")));
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity op = ctx.createMockCreativeServerPlayerInWorld();
+		grantOp(op);
+		AgentBridge.OUTCOME_SINK = new Sink(new CopyOnWriteArrayList<>());
+		AgentBridge.attachProviderForTesting(MockModelProvider.canned(
+				"{\"kind\":\"create_block\",\"id\":\"worldforge:magic_furnace\",\"name\":\"魔法熔炉\","
+						+ "\"appearance\":\"furnace\",\"category\":\"periodic\",\"tick_interval_ticks\":200,"
+						+ "\"output_item\":\"minecraft:iron_ingot\",\"output_count\":1}"),
+				testCfg());
+		try {
+			AgentBridge.chat(server, op, "创建一个魔法熔炉，外观像熔炉，周期性生成铁锭");
+			ctx.waitAndRun(40, () -> {
+				var sink = (Sink) AgentBridge.OUTCOME_SINK;
+				var o = sink.got().isEmpty() ? null : sink.got().get(sink.got().size() - 1);
+				ctx.assertTrue(o != null, "a block proposal must arrive");
+				ctx.assertTrue(o.proposal() instanceof dev.worldforge.ai.Proposal.CreateBlock,
+						"the proposal must be a BLOCK proposal, got " + (o.proposal() == null ? "null"
+								: o.proposal().getClass().getSimpleName()));
+				ctx.assertTrue(o.diffSummary().contains("创建新方块"), "the preview must say 方块: " + o.diffSummary());
+				ctx.assertTrue(dev.worldforge.block.BlockRuntimeManager.get("worldforge:magic_furnace") == null,
+						"phase A must not create the block before confirmation");
+
+				var r = AgentBridge.confirmProposal(server, op, o.proposalId());
+				ctx.assertTrue(r.ok(), "confirm must succeed: " + r.message());
+				var def = dev.worldforge.block.BlockRuntimeManager.get("worldforge:magic_furnace");
+				ctx.assertTrue(def != null, "the block definition must exist after confirmation");
+				ctx.assertTrue(def.category() == dev.worldforge.block.BlockDefinition.Category.PERIODIC,
+						"the capability category must be applied");
+				ctx.assertTrue(def.tickIntervalTicks() == 200, "the interval must be applied");
+				// crucially: the ITEM store must be untouched
+				ctx.assertTrue(WorldForgeRuntimeManager.get("worldforge:magic_furnace") == null,
+						"a block proposal must NOT create an item");
+
+				// give the player the real block item
+				var give = dev.worldforge.tool.WorldForgeBlockTools.give(op, "worldforge:magic_furnace", 1);
+				ctx.assertTrue(give.ok(), "the AI-created block must be obtainable: " + give.message());
+
+				AgentBridge.OUTCOME_SINK = null;
+				AgentBridge.attachProviderForTesting(null, AgentConfig.DISABLED);
+				dev.worldforge.block.BlockRuntimeManager.release();
+				disconnectQuiet(op);
+				ctx.complete();
+			});
+		} catch (Throwable t) {
+			AgentBridge.OUTCOME_SINK = null;
+			AgentBridge.attachProviderForTesting(null, AgentConfig.DISABLED);
+			dev.worldforge.block.BlockRuntimeManager.release();
+			disconnectQuiet(op);
+			ctx.assertTrue(false, "unexpected: " + t);
+			ctx.complete();
+		}
+	}
+
+	/** A14: an ITEM cannot be edited by a block proposal and vice versa */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-ai-block-a14")
+	public void testA14_itemAndBlockTypesAreSeparated(TestContext ctx) {
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(tempDir("wf-a14")));
+		dev.worldforge.block.BlockRuntimeManager.attachStoreForTesting(
+				new dev.worldforge.block.BlockDefinitionStore(tempDir("wf-a14b")));
+		var server = ctx.getWorld().getServer();
+
+		// an ITEM with the shared id
+		WorldForgeRuntimeManager.createItem(new ItemDefinition(ItemDefinition.CURRENT_VERSION,
+				"worldforge:shared", "共享物品", "", TextureSource.default_(),
+				Map.of("damage", 5.0, "max_durability", 100.0), List.of()));
+
+		// a block proposal targeting that id must be refused (no block exists)
+		var updateBlock = new dev.worldforge.ai.Proposal.UpdateBlock("worldforge:shared", null, null,
+				null, null, null, null, null, null);
+		var errs = dev.worldforge.ai.ProposalValidator.validate(updateBlock);
+		ctx.assertTrue(!errs.ok(), "a block update must fail when only an ITEM exists");
+		ctx.assertTrue(errs.joined().contains("方块"), errs.joined());
+
+		// and the item must be untouched
+		ctx.assertTrue(WorldForgeRuntimeManager.get("worldforge:shared") != null,
+				"the item must not be removed by a failed block proposal");
+		ctx.assertTrue(WorldForgeRuntimeManager.get("worldforge:shared").damage() == 5.0,
+				"the item must not be modified by a block proposal");
+
+		// the reverse: create a block with the same id, then an ITEM update fails
+		ctx.assertTrue(dev.worldforge.tool.WorldForgeBlockTools.createBlock(server,
+				dev.worldforge.block.BlockDefinition.create("worldforge:shared", "共享方块", "",
+						"stone", dev.worldforge.block.BlockDefinition.Category.DECORATION, 2.0,
+						List.of(), 200, null, 0)).ok(), "the block may share the id");
+		var updateItem = new dev.worldforge.ai.Proposal.Update("worldforge:shared", null, null, null,
+				99.0, null, null, null, null);
+		// the item exists, so the ITEM update is valid - but it must only touch the item
+		ctx.assertTrue(dev.worldforge.ai.ProposalValidator.validate(updateItem).ok(),
+				"the item update is valid for the item type");
+		var r = dev.worldforge.tool.WorldForgeTools.updateItem(server,
+				dev.worldforge.ai.ProposalJson.mergeUpdate(WorldForgeRuntimeManager.get("worldforge:shared"),
+						updateItem));
+		ctx.assertTrue(r.ok(), "item update must succeed: " + r.message());
+		ctx.assertTrue(WorldForgeRuntimeManager.get("worldforge:shared").damage() == 99.0, "item updated");
+		ctx.assertTrue(dev.worldforge.block.BlockRuntimeManager.get("worldforge:shared").hardness() == 2.0,
+				"the BLOCK must be untouched by an item update");
+
+		dev.worldforge.block.BlockRuntimeManager.release();
+		ctx.complete();
+	}
+
+	private static AgentConfig testCfg() {
+		return new AgentConfig(true, "http://mock", "mock", "sk-test", 5, 100, 0, 30, 12, 300);
+	}
+
+	private static void grantOp(ServerPlayerEntity p) {
+		p.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(p.getGameProfile(), 2, false));
+	}
+
+	private static java.nio.file.Path tempDir(String prefix) {
+		try {
+			return java.nio.file.Files.createTempDirectory(prefix);
+		} catch (Exception e) {
+			throw new RuntimeException("tempdir", e);
 		}
 	}
 

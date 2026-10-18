@@ -142,6 +142,30 @@ public final class WorldForgeStudioProtocol {
 					WorldForgePayloads.syncTo(player);
 					reply(server, player, req.requestId(), true, "ok", "resync-sent", true);
 				}
+				case "blocks_list" -> {
+					reply(server, player, req.requestId(), true, "ok", "blocks", true);
+				}
+				case "block_create", "block_update", "block_delete" -> {
+					if (!hasEditPermission(player)) {
+						reply(server, player, req.requestId(), false, "permission",
+								"需要管理员权限（OP2）才能修改方块定义", false);
+						return;
+					}
+					var r = dispatchBlockMutation(server, kind, req.payload());
+					reply(server, player, req.requestId(), r.ok(),
+							r.ok() ? "ok" : (r.persisted() ? "applied-failed" : "rejected"),
+							r.message(), true);
+				}
+				case "block_give" -> {
+					String bid = optId(req.payload());
+					var def = dev.worldforge.tool.WorldForgeBlockTools.getBlock(bid);
+					if (def == null) {
+						reply(server, player, req.requestId(), false, "rejected", "方块定义不存在：" + bid, false);
+						return;
+					}
+					var r = dev.worldforge.tool.WorldForgeBlockTools.give(player, bid, 1);
+					reply(server, player, req.requestId(), r.ok(), r.ok() ? "ok" : "rejected", r.message(), false);
+				}
 				case "agent_chat" -> {
 					// AI is server-side by design; the player only sends text.
 					// Non-OP players may still CHAT (read-only proposals), but
@@ -208,6 +232,28 @@ public final class WorldForgeStudioProtocol {
 			case "update" -> Kinds.update(server, body);
 			case "delete" -> Kinds.delete(server, body);
 			default -> reject("unknown kind");
+		};
+	}
+
+	/** block mutations: parse + validate + execute through the ONE block tool layer */
+	public static dev.worldforge.tool.WorldForgeBlockTools.BlockToolResult dispatchBlockMutation(
+			MinecraftServer server, String kind, String payload) {
+		JsonObject body;
+		try {
+			body = parseBody(payload);
+		} catch (IllegalArgumentException e) {
+			return new dev.worldforge.tool.WorldForgeBlockTools.BlockToolResult(false, false,
+					dev.worldforge.tool.WorldForgeBlockTools.SyncStatus.NONE, e.getMessage());
+		}
+		return switch (kind) {
+			case "block_create" -> dev.worldforge.tool.WorldForgeBlockTools.createBlock(server,
+					dev.worldforge.block.BlockDefinitionStore.fromJson(body));
+			case "block_update" -> dev.worldforge.tool.WorldForgeBlockTools.updateBlock(server,
+					dev.worldforge.block.BlockDefinitionStore.fromJson(body));
+			case "block_delete" -> dev.worldforge.tool.WorldForgeBlockTools.deleteBlock(server,
+					body.has("id") ? body.get("id").getAsString() : "");
+			default -> new dev.worldforge.tool.WorldForgeBlockTools.BlockToolResult(false, false,
+					dev.worldforge.tool.WorldForgeBlockTools.SyncStatus.NONE, "unknown block kind");
 		};
 	}
 
@@ -294,6 +340,16 @@ public final class WorldForgeStudioProtocol {
 		o.addProperty("version", DefinitionStore.FILE_VERSION);
 		o.add("items", items);
 		o.add("tombstones", tombs);
+		// v0.4.0: virtual BLOCK definitions travel in the same snapshot so the
+		// client mirror (and the block entity renderer) always has them
+		JsonArray blocks = new JsonArray();
+		for (dev.worldforge.block.BlockDefinition d : dev.worldforge.block.BlockRuntimeManager.list()) {
+			blocks.add(dev.worldforge.block.BlockDefinitionStore.toJson(d));
+		}
+		o.add("blocks", blocks);
+		JsonArray blockTombs = new JsonArray();
+		dev.worldforge.block.BlockRuntimeManager.tombstones().forEach(blockTombs::add);
+		o.add("block_tombstones", blockTombs);
 		return o.toString();
 	}
 

@@ -88,6 +88,42 @@ public final class ProposalValidator {
 				}
 			}
 			case Proposal.Delete d -> checkId(d.id(), errs);
+			case Proposal.CreateBlock b -> {
+				checkId(b.id(), errs);
+				checkName(b.name(), errs);
+				checkBlockAppearance(b.appearance(), errs);
+				checkBlockCategory(b.category(), errs);
+				checkRange("hardness", b.hardness(), 0, 50, errs, true);
+				checkBlockPeriodic(b.category(), b.tickIntervalTicks(), b.outputItemId(),
+						b.outputCount(), errs);
+				checkBehaviors(b.behaviors(), errs);
+				if (errs.isEmpty() && dev.worldforge.block.BlockRuntimeManager.get(b.id()) != null) {
+					errs.add("ERROR 已存在同名方块定义，请用 update_block：" + b.id());
+				}
+			}
+			case Proposal.UpdateBlock b -> {
+				checkId(b.id(), errs);
+				if (b.name() != null) {
+					checkName(b.name(), errs);
+				}
+				if (b.appearance() != null) {
+					checkBlockAppearance(b.appearance(), errs);
+				}
+				checkBlockCategory(b.category(), errs);
+				checkRange("hardness", b.hardness(), 0, 50, errs, true);
+				checkBlockPeriodic(b.category(), b.tickIntervalTicks(), b.outputItemId(),
+						b.outputCount(), errs);
+				if (errs.isEmpty() && dev.worldforge.block.BlockRuntimeManager.get(b.id()) == null) {
+					errs.add("ERROR 没有此方块定义可修改：" + b.id()
+							+ "（物品与方块是不同类型，请确认没有把物品当成方块）");
+				}
+			}
+			case Proposal.DeleteBlock b -> {
+				checkId(b.id(), errs);
+				if (errs.isEmpty() && dev.worldforge.block.BlockRuntimeManager.get(b.id()) == null) {
+					errs.add("ERROR 没有此方块定义可删除：" + b.id());
+				}
+			}
 			case Proposal.Query q -> {
 				// read-only, nothing to validate
 			}
@@ -188,6 +224,49 @@ public final class ProposalValidator {
 					}
 				}
 				default -> errs.add("unknown param: " + e.getKey());
+			}
+		}
+	}
+
+	private static void checkBlockAppearance(String appearance, List<String> errs) {
+		if (appearance == null || appearance.isBlank()) {
+			return; // default applies
+		}
+		if (!dev.worldforge.block.BlockCatalog.isSupported(appearance)) {
+			errs.add("外观不在方块支持目录内：" + appearance
+					+ "（可用：" + String.join("/", dev.worldforge.block.BlockCatalog.supportedKeys()) + "）");
+		}
+	}
+
+	private static void checkBlockCategory(String category, List<String> errs) {
+		if (category == null || category.isBlank()) {
+			return;
+		}
+		try {
+			dev.worldforge.block.BlockDefinition.Category.valueOf(
+					category.toUpperCase(java.util.Locale.ROOT));
+		} catch (Exception e) {
+			errs.add("未知方块类型：" + category + "（decoration/interactive/periodic）");
+		}
+	}
+
+	private static void checkBlockPeriodic(String category, Integer interval, String outputItem,
+			Integer outputCount, List<String> errs) {
+		if (category == null || !category.equalsIgnoreCase("periodic")) {
+			return;
+		}
+		if (interval == null || interval < 20) {
+			errs.add("周期方块间隔不得低于 20 tick（1 秒），防止刷物品");
+		} else if (interval > 72000) {
+			errs.add("周期方块间隔不得超过 72000 tick");
+		}
+		if (outputCount != null && (outputCount < 1 || outputCount > 8)) {
+			errs.add("单次产出数量必须在 1-8 之间");
+		}
+		if (outputItem != null && !outputItem.isBlank()) {
+			var id = net.minecraft.util.Identifier.tryParse(outputItem);
+			if (id == null || !net.minecraft.registry.Registries.ITEM.containsId(id)) {
+				errs.add("产出物品不存在：" + outputItem);
 			}
 		}
 	}

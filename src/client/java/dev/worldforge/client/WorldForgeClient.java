@@ -27,8 +27,11 @@ public class WorldForgeClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		ClientPlayNetworking.registerGlobalReceiver(WorldForgePayloads.SyncDefinitions.ID,
-				(payload, context) -> context.client().execute(() ->
-						ClientDefinitionMirror.replaceAllFromSync(payload.json(), payload.tombstones())));
+				(payload, context) -> context.client().execute(() -> {
+					ClientDefinitionMirror.replaceAllFromSync(payload.json(), payload.tombstones());
+					// v0.4.0: the same payload may carry virtual block definitions
+					ClientBlockState.applySnapshot(payload.json());
+				}));
 
 		ClientPlayNetworking.registerGlobalReceiver(WorldForgeStudioProtocol.StudioResponse.ID,
 				(payload, context) -> context.client().execute(() -> {
@@ -40,6 +43,7 @@ public class WorldForgeClient implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
 			ClientDefinitionMirror.clear();
 			ClientStudioState.clear();
+			ClientBlockState.clear();
 		});
 		// joining any world: force a fresh mirror pull; server auto-syncs on JOIN too
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) ->
@@ -63,6 +67,11 @@ public class WorldForgeClient implements ClientModInitializer {
 				break;
 			}
 		});
+
+		// v0.4.0: renderer for placed virtual blocks (borrows vanilla block models)
+		net.minecraft.client.render.block.entity.BlockEntityRendererFactories.register(
+				dev.worldforge.registry.WorldForgeBlocks.DYNAMIC_BLOCK_ENTITY,
+				dev.worldforge.client.render.DynamicBlockEntityRenderer::new);
 
 		// v0.3.2: in-game automated GUI check (only active with run/wf-autotest.flag)
 		dev.worldforge.client.dev.StudioAutoTest.register();

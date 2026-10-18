@@ -62,6 +62,16 @@ public final class ProposalJson {
 				case "create" -> new ParseResult(parseCreate(o), null);
 				case "update" -> new ParseResult(parseUpdate(o), null);
 				case "delete" -> new ParseResult(new Proposal.Delete(str(o, "id")), null);
+				case "create_block" -> new ParseResult(new Proposal.CreateBlock(
+						str(o, "id"), str(o, "name"), str(o, "description"), str(o, "appearance"),
+						str(o, "category") == null ? "decoration" : str(o, "category"),
+						num(o, "hardness"), intg(o, "tick_interval_ticks"),
+						str(o, "output_item"), intg(o, "output_count"), behaviors(o)), null);
+				case "update_block" -> new ParseResult(new Proposal.UpdateBlock(
+						str(o, "id"), str(o, "name"), str(o, "description"), str(o, "appearance"),
+						str(o, "category"), num(o, "hardness"), intg(o, "tick_interval_ticks"),
+						str(o, "output_item"), intg(o, "output_count")), null);
+				case "delete_block" -> new ParseResult(new Proposal.DeleteBlock(str(o, "id")), null);
 				case "query" -> new ParseResult(new Proposal.Query(str(o, "what")), null);
 				default -> new ParseResult(null, "未知 kind: " + kind);
 			};

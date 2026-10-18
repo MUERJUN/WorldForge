@@ -53,6 +53,15 @@ public final class AgentBridge {
 			- 冷却 cooldown_ticks: 0-72000（20 tick = 1 秒）
 			- 外观 texture: 仅限原版槽位目录: minecraft:item/diamond_sword, golden_sword, iron_sword, stone_sword, blaze_rod, ender_eye, gunpowder, nether_star, heart_of_the_sea, emerald, diamond, experience_bottle, sugar, rabbit_foot, stick
 			- 属性: damage(-1000..1000), max_durability(1..65536), attack_speed(-10..10)
+			方块能力（v0.4.0，与物品是不同类型）：
+			- 外观 appearance 仅限原版方块目录: stone/oak_planks/furnace/crafting_table/iron_block/gold_block/emerald_block/amethyst_block/redstone_lamp/bookshelf/barrel/deepslate_tiles
+			- 类型 category: decoration | interactive | periodic（periodic 的 tick_interval_ticks 必须 ≥20）
+			- 方块交互动作: apply_effect/heal/experience/ignite/give_item/sound/particles
+			- 方块提案格式:
+			  创建: {"kind":"create_block","id":"worldforge:xxx","name":"..","appearance":"furnace","category":"periodic","tick_interval_ticks":200,"output_item":"minecraft:iron_ingot","output_count":1,"behaviors":[..]}
+			  修改(差量): {"kind":"update_block","id":"worldforge:xxx","appearance?":"..","tick_interval_ticks?":..}
+			  删除: {"kind":"delete_block","id":"worldforge:xxx"}
+			- 重要：物品与方块即使 id 相同也绝不能互相修改；修改方块必须用 *_block 提案。
 			输出格式（只输出一个 JSON 对象，不要多余文字）：
 			创建: {"kind":"create","id":"worldforge:xxx","name":"..","description":"..","texture":"minecraft:item/..","damage":12,"max_durability":500,"behaviors":[{"trigger":"right_click","action":"summon_lightning","cooldown_ticks":100,"parameters":{}}]}
 			修改(差量，未写字段保持不变): {"kind":"update","id":"worldforge:xxx","name?":"..","damage?":20,"add_behaviors":[..],"set_behaviors?":[..],"remove_triggers?":[..]}
@@ -215,6 +224,8 @@ public final class AgentBridge {
 			String base = switch (proposal) {
 				case Proposal.Update u -> snapshotOf(u.id());
 				case Proposal.Delete d -> snapshotOf(d.id());
+				case Proposal.UpdateBlock b -> blockSnapshotOf(b.id());
+				case Proposal.DeleteBlock b -> blockSnapshotOf(b.id());
 				default -> "";
 			};
 			if (PENDING.size() > MAX_PENDING) {
@@ -227,10 +238,86 @@ public final class AgentBridge {
 				session.setFocusItem(c.id());
 			} else if (proposal instanceof Proposal.Update u) {
 				session.setFocusItem(u.id());
+			} else if (proposal instanceof Proposal.CreateBlock cb) {
+				session.setFocusBlock(cb.id());
+			} else if (proposal instanceof Proposal.UpdateBlock ub) {
+				session.setFocusBlock(ub.id());
 			}
 			deliverNow(player, new AgentOutcome(true, stripJsonNoise(reply), proposalId, proposal,
 					List.of(), ProposalDiff.describe(proposal)));
 		}));
+	}
+
+	/** result of executing a block proposal */
+	private record BlockExec(boolean ok, String message, String itemId) {
+	}
+
+	/** snapshot of a block definition, for the conflict check */
+	private static String blockSnapshotOf(String id) {
+		dev.worldforge.block.BlockDefinition d = dev.worldforge.block.BlockRuntimeManager.get(id);
+		return d == null ? "" : dev.worldforge.block.BlockDefinitionStore.toJson(d).toString();
+	}
+
+	/**
+	 * Execute a block proposal through the unified block tool layer.
+	 *
+	 * @return null when the proposal is not a block proposal
+	 */
+	private static BlockExec executeBlockProposal(MinecraftServer server, Proposal p) {
+		return switch (p) {
+			case Proposal.CreateBlock cb -> {
+				var def = new dev.worldforge.block.BlockDefinition(
+						dev.worldforge.block.BlockDefinition.CURRENT_VERSION, cb.id(), cb.name(),
+						cb.description() == null ? "" : cb.description(),
+						cb.appearance() == null ? dev.worldforge.block.BlockCatalog.DEFAULT_APPEARANCE
+								: cb.appearance(),
+						parseCategory(cb.category()),
+						cb.hardness() == null ? 2.0 : cb.hardness(),
+						cb.behaviors() == null ? List.of()
+								: cb.behaviors().stream().map(ProposalValidator::toBehavior).toList(),
+						cb.tickIntervalTicks() == null ? 200 : cb.tickIntervalTicks(),
+						cb.outputItemId(), cb.outputCount() == null ? 1 : cb.outputCount());
+				var r = dev.worldforge.tool.WorldForgeBlockTools.createBlock(server, def);
+				yield new BlockExec(r.ok(), r.ok()
+						? "已通过 AI 提案创建方块 " + cb.name() + "（" + cb.id() + "）" : r.message(), cb.id());
+			}
+			case Proposal.UpdateBlock ub -> {
+				var cur = dev.worldforge.block.BlockRuntimeManager.get(ub.id());
+				if (cur == null) {
+					yield new BlockExec(false, "方块定义不存在：" + ub.id(), ub.id());
+				}
+				// delta merge: unset fields keep their current values
+				var merged = new dev.worldforge.block.BlockDefinition(
+						cur.version(), cur.id(),
+						ub.name() == null ? cur.name() : ub.name(),
+						ub.description() == null ? cur.description() : ub.description(),
+						ub.appearance() == null ? cur.appearance() : ub.appearance(),
+						ub.category() == null ? cur.category() : parseCategory(ub.category()),
+						ub.hardness() == null ? cur.hardness() : ub.hardness(),
+						cur.behaviors(),
+						ub.tickIntervalTicks() == null ? cur.tickIntervalTicks() : ub.tickIntervalTicks(),
+						ub.outputItemId() == null ? cur.outputItemId() : ub.outputItemId(),
+						ub.outputCount() == null ? cur.outputCount() : ub.outputCount());
+				var r = dev.worldforge.tool.WorldForgeBlockTools.updateBlock(server, merged);
+				yield new BlockExec(r.ok(), r.ok()
+						? "已通过 AI 提案更新方块 " + ub.id() + "（已放置方块立即使用新配置）" : r.message(), ub.id());
+			}
+			case Proposal.DeleteBlock db -> {
+				var r = dev.worldforge.tool.WorldForgeBlockTools.deleteBlock(server, db.id());
+				yield new BlockExec(r.ok(), r.ok()
+						? "已通过 AI 提案删除方块 " + db.id() + "（已放置方块安全失效）" : r.message(), db.id());
+			}
+			default -> null;
+		};
+	}
+
+	private static dev.worldforge.block.BlockDefinition.Category parseCategory(String category) {
+		try {
+			return dev.worldforge.block.BlockDefinition.Category.valueOf(
+					category == null ? "DECORATION" : category.toUpperCase(java.util.Locale.ROOT));
+		} catch (Exception e) {
+			return dev.worldforge.block.BlockDefinition.Category.DECORATION;
+		}
 	}
 
 	private static String snapshotOf(String id) {
@@ -272,6 +359,8 @@ public final class AgentBridge {
 		String current = switch (pending.proposal()) {
 			case Proposal.Update u -> snapshotOf(u.id());
 			case Proposal.Delete d -> snapshotOf(d.id());
+			case Proposal.UpdateBlock b -> blockSnapshotOf(b.id());
+			case Proposal.DeleteBlock b -> blockSnapshotOf(b.id());
 			default -> "";
 		};
 		if (!pending.baseSnapshotJson().equals(current)) {
@@ -279,6 +368,18 @@ public final class AgentBridge {
 			return new ConfirmResult(false, "冲突：该物品在你预览后已被其他操作修改，提案作废，请重新预览", proposalId);
 		}
 		// execute through the ONE tools pipeline (rollback + broadcast included)
+		// v0.4.0: BLOCK proposals are executed through the block tool layer, never
+		// through the item pipeline - a shared virtual id cannot cross types.
+		BlockExec blockExec = executeBlockProposal(server, pending.proposal());
+		if (blockExec != null) {
+			PENDING.remove(pid);
+			if (blockExec.ok()) {
+				EXECUTED.put(proposalId, new AgentOutcome(true, blockExec.message(), proposalId,
+						null, List.of(), null));
+			}
+			WorldForgePayloads.syncToAll(server);
+			return new ConfirmResult(blockExec.ok(), blockExec.message(), proposalId, blockExec.itemId());
+		}
 		WorldForgeTools.ToolResult r = switch (pending.proposal()) {
 			case Proposal.Create c -> WorldForgeTools.createItem(server, ProposalJson.toDefinition(c));
 			case Proposal.Update u -> {
@@ -289,6 +390,13 @@ public final class AgentBridge {
 			}
 			case Proposal.Delete d -> WorldForgeTools.deleteItem(server, d.id());
 			case Proposal.Query q -> new WorldForgeTools.ToolResult(true, true, WorldForgeTools.ToolResult.SyncStatus.NONE, "query");
+			// block kinds returned above and never reach the item pipeline
+			case Proposal.CreateBlock cb -> new WorldForgeTools.ToolResult(false, false,
+					WorldForgeTools.ToolResult.SyncStatus.NONE, "block proposals use the block tools");
+			case Proposal.UpdateBlock ub -> new WorldForgeTools.ToolResult(false, false,
+					WorldForgeTools.ToolResult.SyncStatus.NONE, "block proposals use the block tools");
+			case Proposal.DeleteBlock db -> new WorldForgeTools.ToolResult(false, false,
+					WorldForgeTools.ToolResult.SyncStatus.NONE, "block proposals use the block tools");
 		};
 		PENDING.remove(pid);
 		String itemId = switch (pending.proposal()) {
@@ -296,6 +404,9 @@ public final class AgentBridge {
 			case Proposal.Update u -> u.id();
 			case Proposal.Delete d -> d.id();
 			case Proposal.Query q -> "";
+			case Proposal.CreateBlock cb -> cb.id();
+			case Proposal.UpdateBlock ub -> ub.id();
+			case Proposal.DeleteBlock db -> db.id();
 		};
 		String msg;
 		if (r.ok()) {
