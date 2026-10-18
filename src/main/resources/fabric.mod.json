@@ -31,7 +31,8 @@
 			"dev.worldforge.test.WorldForgeBlockToolTests",
 			"dev.worldforge.test.WorldForgeBlockLifecycleTests",
 			"dev.worldforge.test.WorldForgeChunkLifecycleTests",
-			"dev.worldforge.test.WorldForgeSurvivalBreakTests"
+			"dev.worldforge.test.WorldForgeSurvivalBreakTests",
+			"dev.worldforge.test.WorldForgeBlockE2ETests"
 		]
 	},
 	"depends": {

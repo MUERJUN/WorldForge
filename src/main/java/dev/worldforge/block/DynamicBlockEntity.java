@@ -24,9 +24,11 @@ public class DynamicBlockEntity extends BlockEntity {
 
 	private static final String NBT_ID = "VirtualBlockId";
 	private static final String NBT_TICK = "TickCounter";
+	private static final String NBT_LAST_USE = "LastUseTick";
 
 	private String virtualId = "";
 	private int tickCounter = 0;
+	private long lastUseTick = 0;
 
 	public DynamicBlockEntity(BlockPos pos, BlockState state) {
 		this(WorldForgeBlocks.DYNAMIC_BLOCK_ENTITY, pos, state);
@@ -49,6 +51,15 @@ public class DynamicBlockEntity extends BlockEntity {
 		return tickCounter;
 	}
 
+	public long lastUseTick() {
+		return lastUseTick;
+	}
+
+	public void setLastUseTick(long tick) {
+		this.lastUseTick = tick;
+		markDirty();
+	}
+
 	public BlockDefinition definition() {
 		return BlockRuntimeManager.get(virtualId);
 	}
@@ -60,6 +71,7 @@ public class DynamicBlockEntity extends BlockEntity {
 		super.writeNbt(nbt, registries);
 		nbt.putString(NBT_ID, virtualId);
 		nbt.putInt(NBT_TICK, tickCounter);
+		nbt.putLong(NBT_LAST_USE, lastUseTick);
 	}
 
 	@Override
@@ -67,6 +79,7 @@ public class DynamicBlockEntity extends BlockEntity {
 		super.readNbt(nbt, registries);
 		virtualId = nbt.contains(NBT_ID) ? nbt.getString(NBT_ID) : "";
 		tickCounter = nbt.contains(NBT_TICK) ? nbt.getInt(NBT_TICK) : 0;
+		lastUseTick = nbt.contains(NBT_LAST_USE) ? nbt.getLong(NBT_LAST_USE) : 0;
 	}
 
 	/**

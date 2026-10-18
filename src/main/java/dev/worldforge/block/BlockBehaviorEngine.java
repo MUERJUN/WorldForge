@@ -34,13 +34,22 @@ public final class BlockBehaviorEngine {
 			return ActionResult.PASS;
 		}
 		boolean acted = false;
+		long now = world.getTime();
 		for (BehaviorDefinition b : def.behaviors()) {
 			if (!"right_click".equalsIgnoreCase(b.trigger())) {
 				continue;
 			}
+			// cooldown gate: prevent infinite right-click duplication
+			int cd = b.cooldownTicks();
+			if (cd > 0 && now - be.lastUseTick() < cd) {
+				continue; // still on cooldown
+			}
 			for (String action : b.actions()) {
 				acted |= run(world, pos, player, action, b.parameters());
 			}
+		}
+		if (acted) {
+			be.setLastUseTick(now);
 		}
 		return acted ? ActionResult.SUCCESS : ActionResult.PASS;
 	}
