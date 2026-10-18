@@ -280,6 +280,54 @@ public final class StudioAutoTest {
 					shot(client, "17-back-from-settings");
 				}
 				case 17 -> {
+					// v0.4.0: the BLOCK category of the studio
+					var s = studio(client);
+					check("studio available for the block category", s != null);
+					click(client, s, "▤ 方块");
+					wait(12);
+					check("block category opens", s != null && s.debugMode().equals("BLOCKS"));
+					check("block panel constructed", s != null && s.debugBlocks() != null);
+					shot(client, "18-blocks-category");
+				}
+				case 18 -> {
+					var s = studio(client);
+					var bp = s == null ? null : s.debugBlocks();
+					check("block category defaults to decoration",
+							bp != null && "decoration".equals(bp.debugCategory()));
+					check("block appearance defaults to stone",
+							bp != null && "minecraft:stone".equals(bp.debugAppearance()));
+					// the appearance picker must offer only catalog entries
+					check("block appearance is a catalog entry",
+							bp != null && dev.worldforge.block.BlockCatalog.isSupported(bp.debugAppearance()));
+					click(client, s, "＋ 新建方块");
+					wait(8);
+					check("create mode entered", bp != null && bp.debugCreateMode());
+					shot(client, "19-block-create");
+				}
+				case 19 -> {
+					var s = studio(client);
+					var bp = s == null ? null : s.debugBlocks();
+					// the cycle buttons must stay inside the supported catalog/categories
+					click(client, s, "类型:");
+					wait(4);
+					check("category cycles to a supported value",
+							bp != null && List.of("decoration", "interactive", "periodic")
+									.contains(bp.debugCategory()));
+					click(client, s, "外观:");
+					wait(4);
+					check("appearance cycles within the catalog",
+							bp != null && dev.worldforge.block.BlockCatalog.isSupported(bp.debugAppearance()));
+					shot(client, "20-block-editor");
+				}
+				case 20 -> {
+					var s = studio(client);
+					// ESC returns from the block category to the item list, then closes
+					s.keyPressed(256, 0, 0);
+					wait(8);
+					check("ESC leaves the block category", s != null && s.debugMode().equals("LIST"));
+					shot(client, "21-blocks-back");
+				}
+				case 21 -> {
 					finish(client);
 				}
 				default -> {

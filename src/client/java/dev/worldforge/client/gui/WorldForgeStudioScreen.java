@@ -1,5 +1,6 @@
 package dev.worldforge.client.gui;
 
+import dev.worldforge.client.ClientBlockState;
 import dev.worldforge.client.ClientStudioState;
 import dev.worldforge.definition.AppearanceSlots;
 import dev.worldforge.definition.BehaviorDefinition;
@@ -41,7 +42,7 @@ import java.util.Map;
  */
 public class WorldForgeStudioScreen extends Screen {
 
-	public enum Mode { LIST, EDIT, CREATE, APPEAR_PICK, DELETE_CONFIRM, AI, AI_SETTINGS }
+	public enum Mode { LIST, EDIT, CREATE, APPEAR_PICK, DELETE_CONFIRM, AI, AI_SETTINGS, BLOCKS }
 
 	/**
 	 * v0.3.2: the AUTHORITATIVE UI state machine. Every navigation, draft
@@ -76,6 +77,7 @@ public class WorldForgeStudioScreen extends Screen {
 	private List<ItemDefinition> rows = new ArrayList<>();
 	private AiStudioPanel aiPanel;
 	private AiSettingsPanel settingsPanel;
+	private BlockStudioPanel blockPanel;
 
 	// appearance picker hit zones, rebuilt each frame
 	private final List<int[]> pickerZones = new ArrayList<>();
@@ -125,6 +127,7 @@ public class WorldForgeStudioScreen extends Screen {
 
 		button(x0 + 8, y0 + panelH - 66, lw, 18, "§d✦ AI 创造面板", b -> enterAi());
 		button(x0 + 8, y0 + panelH - 86, lw, 18, "§b⚙ AI 设置", b -> enterSettings());
+		button(x0 + 8, y0 + panelH - 106, lw, 18, "§6▤ 方块", b -> enterBlocks());
 		button(x0 + 8, y0 + panelH - 46, lw, 18, "＋ 创建物品", b -> enterCreate());
 		button(x0 + 8, y0 + panelH - 26, lw / 2 - 2, 16, "刷新", b -> sendRequest("list", ""));
 		button(x0 + 8 + lw / 2 + 2, y0 + panelH - 26, lw / 2 - 2, 16, "关闭 (ESC)", b -> guardedClose());
@@ -187,6 +190,50 @@ public class WorldForgeStudioScreen extends Screen {
 			addDrawableChild(b);
 		}
 		for (var f : settingsPanel.fields()) {
+			addDrawableChild(f);
+		}
+
+		blockPanel = new BlockStudioPanel(ui, new BlockStudioPanel.Bridge() {
+			@Override
+			public void requestList() {
+				sendRequest("blocks_list", "");
+			}
+
+			@Override
+			public boolean sendCreate(String json) {
+				return sendRequest("block_create", json);
+			}
+
+			@Override
+			public boolean sendUpdate(String json) {
+				return sendRequest("block_update", json);
+			}
+
+			@Override
+			public boolean sendDelete(String id) {
+				return sendRequest("block_delete", jsonOf("id", id));
+			}
+
+			@Override
+			public boolean sendGive(String id) {
+				return sendRequest("block_give", jsonOf("id", id));
+			}
+
+			@Override
+			public void markDirty() {
+				ui.markDirty();
+			}
+
+			@Override
+			public void markSaved() {
+				ui.markSaved();
+			}
+		});
+		blockPanel.init(x0 + 176, y0 + 24, panelW - 192, panelH - 56);
+		for (var b : blockPanel.buttons()) {
+			addDrawableChild(b);
+		}
+		for (var f : blockPanel.fields()) {
 			addDrawableChild(f);
 		}
 
@@ -272,6 +319,28 @@ public class WorldForgeStudioScreen extends Screen {
 	private void applyMode() {
 		// v0.3.2: widget visibility is derived from the state machine so that
 		// drawing and interaction can never disagree.
+		if (ui.blocksVisible()) {
+			for (TextFieldWidget f : new TextFieldWidget[]{idField, nameField, descField, damageField,
+					durabilityField, param1, param2, cooldownField}) {
+				f.visible = false;
+			}
+			for (ButtonWidget b : new ButtonWidget[]{appearanceButton, triggerButton, actionButton,
+					saveButton, addButton, giveButton, deleteButton, backButton}) {
+				b.visible = false;
+			}
+			aiPanel.input().visible = false;
+			for (var b : aiPanel.buttons()) {
+				b.visible = false;
+			}
+			if (settingsPanel != null) {
+				settingsPanel.applyVisibility(false);
+			}
+			blockPanel.applyVisibility(true, blockPanel.editorOpen());
+			return;
+		}
+		if (blockPanel != null) {
+			blockPanel.applyVisibility(false, false);
+		}
 		if (ui.settingsVisible()) {
 			for (TextFieldWidget f : new TextFieldWidget[]{idField, nameField, descField, damageField,
 					durabilityField, param1, param2, cooldownField}) {
@@ -417,6 +486,14 @@ public class WorldForgeStudioScreen extends Screen {
 	}
 
 	/** open the settings page through the draft guard (same rules as the editor) */
+	/** open the BLOCK category through the same draft guard as everything else */
+	private void enterBlocks() {
+		if (!navigate(Mode.BLOCKS, "§e当前有未保存内容：再点「▤ 方块」将放弃")) {
+			return;
+		}
+		sendRequest("blocks_list", "");
+	}
+
 	private void enterSettings() {
 		if (!navigate(Mode.AI_SETTINGS, "§e当前有未保存内容：再点「⚙ AI 设置」将放弃")) {
 			return;
@@ -848,6 +925,20 @@ public class WorldForgeStudioScreen extends Screen {
 
 		String snapWarn = snapshotOk ? "" : " §c(快照解析失败，请点刷新)";
 		switch (kind) {
+			case "blocks_list" -> {
+				if (!r.snapshot().isEmpty()) {
+					ClientBlockState.applySnapshot(r.snapshot());
+				}
+				setStatus("§a已同步方块定义（" + ClientBlockState.list().size() + " 个）");
+			}
+			case "block_create", "block_update", "block_delete" -> {
+				if (!r.snapshot().isEmpty()) {
+					ClientBlockState.applySnapshot(r.snapshot());
+				}
+				ui.markSaved();
+				setStatus(r.ok() ? "§a" + r.message() : "§c" + r.message());
+			}
+			case "block_give" -> setStatus(r.ok() ? "§a" + r.message() : "§c" + r.message());
 			case "agent_chat" -> {
 				aiPanel.onChatAccepted(r.ok(), r.message());
 				applyMode();
@@ -989,6 +1080,28 @@ public class WorldForgeStudioScreen extends Screen {
 
 		renderListColumn(ctx, mouseX, mouseY);
 
+		if (ui.blocksVisible()) {
+			for (TextFieldWidget f : new TextFieldWidget[]{idField, nameField, descField, damageField,
+					durabilityField, param1, param2, cooldownField}) {
+				f.visible = false;
+			}
+			for (ButtonWidget b : new ButtonWidget[]{appearanceButton, triggerButton, actionButton,
+					saveButton, addButton, giveButton, deleteButton, backButton}) {
+				b.visible = false;
+			}
+			aiPanel.input().visible = false;
+			for (var b : aiPanel.buttons()) {
+				b.visible = false;
+			}
+			if (settingsPanel != null) {
+				settingsPanel.applyVisibility(false);
+			}
+			blockPanel.applyVisibility(true, blockPanel.editorOpen());
+			return;
+		}
+		if (blockPanel != null) {
+			blockPanel.applyVisibility(false, false);
+		}
 		if (ui.settingsVisible()) {
 			for (TextFieldWidget f : new TextFieldWidget[]{idField, nameField, descField, damageField,
 					durabilityField, param1, param2, cooldownField}) {
@@ -1011,8 +1124,33 @@ public class WorldForgeStudioScreen extends Screen {
 		if (ui.aiVisible()) {
 			aiPanel.render(ctx, x0 + 176, y0 + 24, panelW - 192, panelH - 56);
 		}
+		if (ui.blocksVisible()) {
+			for (TextFieldWidget f : new TextFieldWidget[]{idField, nameField, descField, damageField,
+					durabilityField, param1, param2, cooldownField}) {
+				f.visible = false;
+			}
+			for (ButtonWidget b : new ButtonWidget[]{appearanceButton, triggerButton, actionButton,
+					saveButton, addButton, giveButton, deleteButton, backButton}) {
+				b.visible = false;
+			}
+			aiPanel.input().visible = false;
+			for (var b : aiPanel.buttons()) {
+				b.visible = false;
+			}
+			if (settingsPanel != null) {
+				settingsPanel.applyVisibility(false);
+			}
+			blockPanel.applyVisibility(true, blockPanel.editorOpen());
+			return;
+		}
+		if (blockPanel != null) {
+			blockPanel.applyVisibility(false, false);
+		}
 		if (ui.settingsVisible()) {
 			settingsPanel.render(ctx, x0 + 176, y0 + 24, panelW - 192, panelH - 56);
+		}
+		if (ui.blocksVisible()) {
+			blockPanel.render(ctx, x0 + 176, y0 + 24, panelW - 192, panelH - 56, mouseX, mouseY);
 		}
 
 		if (ui.dirty() && ui.editorVisible()) {
@@ -1193,6 +1331,14 @@ public class WorldForgeStudioScreen extends Screen {
 			}
 			return true; // swallow
 		}
+		if (ui.blocksVisible()) {
+			var hit = blockPanel.rowAt(mouseX, mouseY, x0 + 176, y0 + 24, panelW - 192, panelH - 56);
+			if (hit != null) {
+				blockPanel.edit(hit);
+				applyMode();
+				return true;
+			}
+		}
 		// list row click
 		int lx = x0 + 8, ly = y0 + 26, lw = 160, rowH = 22;
 		int maxRows = Math.max(1, (panelH - 100) / rowH);
@@ -1221,6 +1367,9 @@ public class WorldForgeStudioScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double amountX, double amountY) {
+		if (ui.blocksVisible() && blockPanel != null && blockPanel.scroll(amountY)) {
+			return true;
+		}
 		int lx = x0 + 8, ly = y0 + 26, lw = 160;
 		int maxRows = Math.max(1, (panelH - 100) / 22);
 		if (!inModal() && mouseX >= lx && mouseX <= lx + lw && mouseY >= ly && mouseY <= ly + maxRows * 22) {
@@ -1263,6 +1412,11 @@ public class WorldForgeStudioScreen extends Screen {
 			case "settings_key" -> settingsPanel.debugKeyField();
 			default -> null;
 		};
+	}
+
+	/** the block panel, for assertions in the automated check */
+	public BlockStudioPanel debugBlocks() {
+		return blockPanel;
 	}
 
 	/** the AI settings panel, for assertions in the automated check */

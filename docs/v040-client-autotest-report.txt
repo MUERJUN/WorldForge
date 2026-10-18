@@ -63,4 +63,22 @@
 [PASS] second back press discards the settings draft
 [PASS] settings draft flag cleared
 [SHOT] wf-autotest-17-17-back-from-settings.png
+[PASS] studio available for the block category
+[INFO] clicked '§6▤ 方块' at (96,127)
+[PASS] block category opens
+[PASS] block panel constructed
+[SHOT] wf-autotest-18-18-blocks-category.png
+[PASS] block category defaults to decoration
+[PASS] block appearance defaults to stone
+[PASS] block appearance is a catalog entry
+[INFO] clicked '＋ 新建方块' at (237,191)
+[PASS] create mode entered
+[SHOT] wf-autotest-19-19-block-create.png
+[INFO] clicked '类型: 装饰' at (237,143)
+[PASS] category cycles to a supported value
+[INFO] clicked '外观: stone' at (349,143)
+[PASS] appearance cycles within the catalog
+[SHOT] wf-autotest-20-20-block-editor.png
+[PASS] ESC leaves the block category
+[SHOT] wf-autotest-21-21-blocks-back.png
 [RESULT] ALL CHECKS PASSED

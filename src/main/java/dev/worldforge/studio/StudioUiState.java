@@ -30,7 +30,7 @@ import java.util.List;
  */
 public final class StudioUiState {
 
-	public enum Mode { LIST, EDIT, CREATE, APPEAR_PICK, DELETE_CONFIRM, AI, AI_SETTINGS }
+	public enum Mode { LIST, EDIT, CREATE, APPEAR_PICK, DELETE_CONFIRM, AI, AI_SETTINGS, BLOCKS }
 
 	public enum AiPhase { IDLE, THINKING, PROPOSAL }
 
@@ -118,6 +118,24 @@ public final class StudioUiState {
 
 	public boolean settingsVisible() {
 		return mode == Mode.AI_SETTINGS;
+	}
+
+	/** v0.4.0: the BLOCK category of the studio list */
+	public boolean blocksVisible() {
+		return mode == Mode.BLOCKS;
+	}
+
+	/** switch the list category (items <-> blocks) without losing the draft guard */
+	public Nav switchCategory(boolean blocks) {
+		if (blocks && mode == Mode.LIST) {
+			setMode(Mode.BLOCKS);
+			return Nav.MOVED;
+		}
+		if (!blocks && mode == Mode.BLOCKS) {
+			setMode(Mode.LIST);
+			return Nav.MOVED;
+		}
+		return Nav.IGNORED;
 	}
 
 	// ---------------------------------------------------------- settings draft
@@ -237,6 +255,10 @@ public final class StudioUiState {
 	 */
 	public Esc pressEsc() {
 		switch (mode) {
+			case BLOCKS -> {
+				setMode(Mode.LIST);
+				return Esc.MOVED;
+			}
 			case AI_SETTINGS -> {
 				Nav nav = requestNavigation(Mode.LIST);
 				return nav == Nav.NEEDS_CONFIRM ? Esc.NEEDS_CONFIRM : Esc.MOVED;
