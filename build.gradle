@@ -15,6 +15,19 @@ loom {
 			sourceSet sourceSets.client
 		}
 	}
+
+	runs {
+		// v0.4.0: a dedicated client run that jumps STRAIGHT into a world, so the
+		// in-game automated check can capture real in-world block-render evidence
+		// without depending on the title screen or on opening a world at runtime.
+		// Usage: ./gradlew runClientInWorld -PwfWorld="New World"
+		clientInWorld {
+			client()
+			configName = "Minecraft Client (in-world autotest)"
+			programArgs "--quickPlaySingleplayer", project.findProperty("wfWorld") ?: "New World"
+			property "worldforge.autotest", "1"
+		}
+	}
 }
 
 fabricApi {

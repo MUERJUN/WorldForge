@@ -24,7 +24,7 @@ import java.util.List;
  */
 public final class WorldForgePayloads {
 
-	public record SyncDefinitions(String json, List<String> tombstones) implements CustomPayload {
+	public record SyncDefinitions(String json, List<String> tombstones, String blocksJson) implements CustomPayload {
 		public static final Id<SyncDefinitions> ID =
 				new Id<>(WorldForge.id("sync_definitions"));
 		public static final PacketCodec<? super RegistryByteBuf, SyncDefinitions> CODEC =
@@ -32,6 +32,7 @@ public final class WorldForgePayloads {
 						PacketCodecs.STRING, SyncDefinitions::json,
 						PacketCodecs.collection((java.util.function.IntFunction<List<String>>) ArrayList::new,
 								PacketCodecs.STRING), SyncDefinitions::tombstones,
+						PacketCodecs.STRING, SyncDefinitions::blocksJson,
 						SyncDefinitions::new);
 
 		@Override
@@ -48,7 +49,9 @@ public final class WorldForgePayloads {
 	public static SyncDefinitions buildSnapshot() {
 		return new SyncDefinitions(
 				DefinitionStore.toJsonString(WorldForgeRuntimeManager.list()),
-				List.copyOf(WorldForgeRuntimeManager.tombstones()));
+				List.copyOf(WorldForgeRuntimeManager.tombstones()),
+				dev.worldforge.block.BlockDefinitionStore.toJsonString(
+						dev.worldforge.block.BlockRuntimeManager.list()));
 	}
 
 	/** True when this player's client registered our sync channel (WF client). */

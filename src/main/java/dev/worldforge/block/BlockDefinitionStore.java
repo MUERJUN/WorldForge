@@ -212,6 +212,18 @@ public final class BlockDefinitionStore {
 
 	// ---------------------------------------------------------------- json
 
+	/** serialize a list of definitions to a JSON string (for network sync) */
+	public static String toJsonString(java.util.List<BlockDefinition> defs) {
+		JsonObject root = new JsonObject();
+		root.addProperty("version", FILE_VERSION);
+		JsonArray arr = new JsonArray();
+		for (BlockDefinition d : defs) {
+			arr.add(toJson(d));
+		}
+		root.add("blocks", arr);
+		return root.toString();
+	}
+
 	public static JsonObject toJson(BlockDefinition d) {
 		JsonObject o = new JsonObject();
 		o.addProperty("version", d.version());

@@ -40,7 +40,7 @@ public final class StudioAutoTest {
 	private static final String REPORT = "wf-autotest-report.txt";
 
 	/** last driver step that operates on the Studio UI (needs an open screen) */
-	private static final int UI_LAST_STEP = 21;
+	private static final int UI_LAST_STEP = 20;
 
 	private final List<String> report = new ArrayList<>();
 	private int step = 0;
@@ -87,7 +87,7 @@ public final class StudioAutoTest {
 		ticksAlive++;
 		// safety net: never leave a run without a report (the harness must always
 		// produce evidence, even if a step stalls waiting on the world)
-		if (!reportWritten && ticksAlive > 3000) {
+		if (!reportWritten && ticksAlive > 6000) {
 			report.add("[WARN] driver hit its tick budget; finishing early");
 			finish(client);
 		}
@@ -366,7 +366,7 @@ public final class StudioAutoTest {
 								// (step was already incremented, so rewind it) and let the
 								// wait budget elapse before giving up.
 								step--;
-								worldWait = 1200;
+								worldWait = 3600;
 								break;
 							}
 						}
@@ -573,7 +573,7 @@ public final class StudioAutoTest {
 							"minecraft:gold_block", dev.worldforge.block.BlockDefinition.Category.DECORATION,
 							2.0, java.util.List.of(), 200, null, 0));
 
-			var world = (net.minecraft.server.world.ServerWorld) player.getWorld();
+			var world = server.getOverworld();
 			var base = player.getBlockPos().add(2, 0, 3);
 			placedX = base.getX();
 			placedY = base.getY();

@@ -81,4 +81,11 @@
 [SHOT] wf-autotest-20-20-block-editor.png
 [PASS] ESC leaves the block category
 [SHOT] wf-autotest-21-21-blocks-back.png
+[INFO] opening existing world 'New World' for the render check
+[PASS] player available for the render check
+[SHOT] wf-autotest-22-23-world-blocks-view.png
+[PASS] client block mirror is populated
+[PASS] renderer resolves a catalog appearance
+[PASS] different virtual ids resolve different appearances
+[SHOT] wf-autotest-23-24-world-blocks-close.png
 [RESULT] ALL CHECKS PASSED

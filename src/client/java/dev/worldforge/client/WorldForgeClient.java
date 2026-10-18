@@ -30,7 +30,7 @@ public class WorldForgeClient implements ClientModInitializer {
 				(payload, context) -> context.client().execute(() -> {
 					ClientDefinitionMirror.replaceAllFromSync(payload.json(), payload.tombstones());
 					// v0.4.0: the same payload may carry virtual block definitions
-					ClientBlockState.applySnapshot(payload.json());
+					ClientBlockState.applySnapshot(payload.blocksJson());
 				}));
 
 		ClientPlayNetworking.registerGlobalReceiver(WorldForgeStudioProtocol.StudioResponse.ID,

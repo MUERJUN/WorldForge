@@ -491,7 +491,8 @@ public class WorldForgeGameTests {
 		dev.worldforge.network.WorldForgePayloads.SyncDefinitions original =
 				new dev.worldforge.network.WorldForgePayloads.SyncDefinitions(
 						"{\"version\":1,\"items\":[{\"id\":\"worldforge:r5_item\",\"name\":\"R5同步\",\"version\":1}]}",
-						java.util.List.of("worldforge:gone"));
+						java.util.List.of("worldforge:gone"),
+						"{\"version\":1,\"blocks\":[]}");
 		io.netty.buffer.ByteBuf raw = io.netty.buffer.Unpooled.buffer();
 		net.minecraft.network.RegistryByteBuf buf =
 				new net.minecraft.network.RegistryByteBuf(raw, ctx.getWorld().getRegistryManager());
