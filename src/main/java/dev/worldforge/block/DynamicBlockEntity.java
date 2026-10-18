@@ -83,7 +83,7 @@ public class DynamicBlockEntity extends BlockEntity {
 		return be instanceof DynamicBlockEntity d ? d.virtualId() : null;
 	}
 
-	/** server-side tick: periodic emission with a hard quota (see BlockRuntimeManager) */
+	/** server-side tick: periodic emission with a hard quota */
 	public void serverTick(World world, BlockPos pos, BlockState state) {
 		BlockDefinition def = definition();
 		if (def == null || !def.periodic()) {
@@ -93,8 +93,11 @@ public class DynamicBlockEntity extends BlockEntity {
 		if (tickCounter < Math.max(1, def.tickIntervalTicks())) {
 			return;
 		}
-		tickCounter = 0;
-		markDirty();
-		BlockRuntimeManager.runPeriodic(world, pos, def);
+		// v0.4.0 fix: only consume the pending tick when the emission actually
+		// ran; a budget-starved block keeps its counter and retries next tick.
+		if (BlockRuntimeManager.runPeriodic(world, pos, def)) {
+			tickCounter = 0;
+			markDirty();
+		}
 	}
 }

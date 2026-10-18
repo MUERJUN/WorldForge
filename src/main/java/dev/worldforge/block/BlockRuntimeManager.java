@@ -109,15 +109,18 @@ public final class BlockRuntimeManager {
 		if (DEFINITIONS.containsKey(def.id())) {
 			return new MutationResult(false, "已存在同名方块定义：" + def.id());
 		}
-		TOMBSTONES.remove(def.id());
-		Map<String, BlockDefinition> snapshot = new LinkedHashMap<>(DEFINITIONS);
+		// v0.4.0 fix: snapshot BOTH maps BEFORE touching either of them. The
+		// previous order removed the tombstone first, so a failed save restored
+		// the definition map but silently lost the tombstone - leaving a deleted
+		// id looking "never existed" (placed blocks would then resolve as null
+		// without the失效 marker being tracked).
+		Map<String, BlockDefinition> defSnapshot = new LinkedHashMap<>(DEFINITIONS);
 		Set<String> tombSnapshot = new LinkedHashSet<>(TOMBSTONES);
+
 		DEFINITIONS.put(def.id(), def);
+		TOMBSTONES.remove(def.id());
 		if (!persist()) {
-			DEFINITIONS.clear();
-			DEFINITIONS.putAll(snapshot);
-			TOMBSTONES.clear();
-			TOMBSTONES.addAll(tombSnapshot);
+			restore(defSnapshot, tombSnapshot);
 			return new MutationResult(false, "方块定义未能写入磁盘，已回滚");
 		}
 		return new MutationResult(true, "created " + def.id());
@@ -127,11 +130,11 @@ public final class BlockRuntimeManager {
 		if (!DEFINITIONS.containsKey(def.id())) {
 			return new MutationResult(false, "方块定义不存在：" + def.id());
 		}
-		Map<String, BlockDefinition> snapshot = new LinkedHashMap<>(DEFINITIONS);
+		Map<String, BlockDefinition> defSnapshot = new LinkedHashMap<>(DEFINITIONS);
+		Set<String> tombSnapshot = new LinkedHashSet<>(TOMBSTONES);
 		DEFINITIONS.put(def.id(), def);
 		if (!persist()) {
-			DEFINITIONS.clear();
-			DEFINITIONS.putAll(snapshot);
+			restore(defSnapshot, tombSnapshot);
 			return new MutationResult(false, "方块定义未能写入磁盘，已回滚");
 		}
 		return new MutationResult(true, "updated " + def.id());
@@ -141,23 +144,42 @@ public final class BlockRuntimeManager {
 		if (!DEFINITIONS.containsKey(id)) {
 			return new MutationResult(false, "方块定义不存在：" + id);
 		}
-		Map<String, BlockDefinition> snapshot = new LinkedHashMap<>(DEFINITIONS);
+		Map<String, BlockDefinition> defSnapshot = new LinkedHashMap<>(DEFINITIONS);
 		Set<String> tombSnapshot = new LinkedHashSet<>(TOMBSTONES);
 		DEFINITIONS.remove(id);
 		TOMBSTONES.add(id); // placed blocks keep their identity and become inert
 		if (!persist()) {
-			DEFINITIONS.clear();
-			DEFINITIONS.putAll(snapshot);
-			TOMBSTONES.clear();
-			TOMBSTONES.addAll(tombSnapshot);
+			restore(defSnapshot, tombSnapshot);
 			return new MutationResult(false, "方块定义未能写入磁盘，已回滚");
 		}
 		return new MutationResult(true, "deleted " + id);
 	}
 
+	private static void restore(Map<String, BlockDefinition> defs, Set<String> tombs) {
+		DEFINITIONS.clear();
+		DEFINITIONS.putAll(defs);
+		TOMBSTONES.clear();
+		TOMBSTONES.addAll(tombs);
+	}
+
+	/**
+	 * v0.4.0 fix: an unbound store is an ERROR, not a success. Reporting
+	 * "persisted" with nowhere to persist to is exactly the kind of fake
+	 * success that hides data loss; callers must bind a store (the lifecycle
+	 * does it on server start, tests use {@link #attachStoreForTesting}).
+	 */
 	private static boolean persist() {
 		BlockDefinitionStore s = store;
-		return s == null || s.save(new ArrayList<>(DEFINITIONS.values()));
+		if (s == null) {
+			WorldForge.LOGGER.error("[WorldForge] block definition change rejected: no block store is bound");
+			return false;
+		}
+		return s.save(new ArrayList<>(DEFINITIONS.values()));
+	}
+
+	/** true when a store is bound (diagnostics and tests) */
+	public static boolean isBound() {
+		return store != null;
 	}
 
 	// ---------------------------------------------------------------- runtime
@@ -171,29 +193,33 @@ public final class BlockRuntimeManager {
 	 * Periodic emission for one block entity. Quota-limited per tick and
 	 * guarded against unbounded output (count is clamped, item must resolve).
 	 */
-	public static void runPeriodic(World world, BlockPos pos, BlockDefinition def) {
+	public static boolean runPeriodic(World world, BlockPos pos, BlockDefinition def) {
 		if (!(world instanceof ServerWorld sw)) {
-			return;
+			return false;
 		}
 		if (periodicUsedThisTick >= PERIODIC_BUDGET_PER_TICK) {
-			return; // budget exhausted this tick: the block simply waits
+			// v0.4.0 fix: returning false lets the caller KEEP its pending tick
+			// instead of resetting the timer, so a budget-starved block fires on
+			// a later tick rather than being skipped for a whole interval.
+			return false;
 		}
 		periodicUsedThisTick++;
 		if (def.outputItemId() == null || def.outputItemId().isBlank()) {
-			return;
+			return true; // the turn was spent, nothing to emit
 		}
 		Identifier itemId = Identifier.tryParse(def.outputItemId());
 		if (itemId == null) {
-			return;
+			return true;
 		}
 		Item item = Registries.ITEM.get(itemId);
 		if (item == null || item == net.minecraft.item.Items.AIR) {
-			return;
+			return true;
 		}
 		int count = Math.max(1, Math.min(8, def.outputCount()));
 		BlockState state = sw.getBlockState(pos);
 		net.minecraft.block.Block.dropStack(sw, pos, new ItemStack(item, count));
 		sw.updateListeners(pos, state, state, 3);
+		return true;
 	}
 
 	/** reset the per-tick budget (called from the server tick event) */

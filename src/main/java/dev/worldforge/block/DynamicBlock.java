@@ -92,28 +92,35 @@ public class DynamicBlock extends Block implements net.minecraft.block.BlockEnti
 		return BlockBehaviorEngine.onUse(world, pos, player, def, be);
 	}
 
-	/** breaking a dynamic block returns the SAME virtual identity as an item */
-	@Override
-	public void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
-		if (!state.isOf(newState.getBlock()) && !world.isClient
-				&& world.getBlockEntity(pos) instanceof DynamicBlockEntity be
-				&& !be.virtualId().isBlank()) {
-			ItemStack drop = new ItemStack(WorldForgeBlocks.DYNAMIC_BLOCK_ITEM);
-			drop.set(WorldForgeComponents.VIRTUAL_BLOCK_ID, new VirtualBlockId(be.virtualId()));
-			Block.dropStack(world, pos, drop);
-		}
-		super.onStateReplaced(state, world, pos, newState, moved);
+	/**
+	 * v0.4.0 fix: the identified drop is produced in {@link #onBreak}, which is
+	 * the only place that knows WHO removed the block. The previous
+	 * implementation dropped from {@code onStateReplaced}, which fires for every
+	 * removal - including a creative break and repeated state replacements - so
+	 * creative players could duplicate items and a single break could drop twice.
+	 *
+	 * <p>Known limitation (documented, not faked): removals that are not player
+	 * breaks (explosions, pistons) currently do not return the item, because the
+	 * generic block has no per-definition loot table.</p>
+	 */
+	public static ItemStack identifiedDrop(String virtualId) {
+		ItemStack drop = new ItemStack(WorldForgeBlocks.DYNAMIC_BLOCK_ITEM);
+		drop.set(WorldForgeComponents.VIRTUAL_BLOCK_ID, new VirtualBlockId(virtualId));
+		return drop;
+	}
+
+	/** true when this removal should yield the identified item */
+	public static boolean shouldDrop(PlayerEntity player) {
+		return player != null && !player.isCreative();
 	}
 
 	@Override
 	public BlockState onBreak(World world, BlockPos pos, BlockState state, PlayerEntity player) {
-		// the identified drop is produced in onStateReplaced
+		if (!world.isClient && shouldDrop(player)
+				&& world.getBlockEntity(pos) instanceof DynamicBlockEntity be
+				&& !be.virtualId().isBlank()) {
+			Block.dropStack(world, pos, identifiedDrop(be.virtualId()));
+		}
 		return super.onBreak(world, pos, state, player);
-	}
-
-	/** never used silently: exposes the shared-physics limitation in-game */
-	@Override
-	public void onBlockAdded(BlockState state, World world, BlockPos pos, BlockState oldState, boolean notify) {
-		super.onBlockAdded(state, world, pos, oldState, notify);
 	}
 }
