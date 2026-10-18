@@ -50,8 +50,17 @@
 [PASS] key state never exposes a fragment
 [PASS] read-only page explains who manages the key
 [PASS] key input is empty on entry (no echo of a stored key)
+[PASS] typed key is masked in the widget (P0 secret fix)
+[PASS] mask length matches the typed key
+[PASS] no fragment of the typed key is rendered
+[PASS] panel kept the real key in state only
+[PASS] status/debug strings never contain the key
 [SHOT] wf-autotest-15-15-ai-settings-readonly.png
 [INFO] clicked '« 返回' at (220,189)
-[PASS] settings page returns to the list
-[SHOT] wf-autotest-16-16-back-from-settings.png
+[PASS] unsaved settings are guarded on the first back press
+[SHOT] wf-autotest-16-16-settings-guard.png
+[INFO] clicked '« 返回' at (220,189)
+[PASS] second back press discards the settings draft
+[PASS] settings draft flag cleared
+[SHOT] wf-autotest-17-17-back-from-settings.png
 [RESULT] ALL CHECKS PASSED

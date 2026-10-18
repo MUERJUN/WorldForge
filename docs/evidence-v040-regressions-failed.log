@@ -1,0 +1,6 @@
+worldforgeblockregressiontests.testr1_failedcreaterestorestombstone failed at -1450809, -60, -5725707! REGRESSION: the tombstone must be restored, otherwise a deleted id looks never-deleted
+worldforgeblockregressiontests.testr2_unboundstoreisnotfakesuccess failed at -1450796, -60, -5725707! REGRESSION: creating without a bound store must fail, not pretend to save
+worldforgeblockregressiontests.testr3_periodicbudgetkeepspendingtick failed at -1450783, -60, -5725707! over budget the manager must report 'not run' so the caller can retry later
+worldforgeblockregressiontests.testr4_creativebreakdoesnotdrop failed at -1450770, -60, -5725707! REGRESSION: creative breaks must not drop the identified item
+========= 34 GAME TESTS COMPLETE IN 3.419 s ======================
+4 required tests failed :(

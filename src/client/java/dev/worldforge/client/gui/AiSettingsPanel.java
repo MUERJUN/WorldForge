@@ -3,6 +3,7 @@ package dev.worldforge.client.gui;
 import dev.worldforge.ai.AgentConfig;
 import dev.worldforge.ai.AgentConfigStore;
 import dev.worldforge.ai.AgentConnectionTest;
+import dev.worldforge.ai.SecretInput;
 import dev.worldforge.studio.StudioUiState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
@@ -51,6 +52,9 @@ public final class AiSettingsPanel {
 	private String model = "";
 	private boolean enabled = true;
 	private String keyStatus = "未配置";
+	/** the ONLY place a freshly typed key exists; the widget holds asterisks */
+	private SecretInput.State keyState = SecretInput.empty();
+	private boolean rewritingKeyField = false;
 	private String statusLine = "§7修改后点「保存」即可生效，无需重启游戏";
 	private String statusColor = "§7";
 	private TextFieldWidget focusedOnEntry;
@@ -84,6 +88,21 @@ public final class AiSettingsPanel {
 		rowY += 22;
 
 		keyField = field(x, rowY, w - 76, KEY_PLACEHOLDER, onDirty);
+		keyField.setChangedListener(text -> {
+			if (rewritingKeyField) {
+				return;
+			}
+			keyState = SecretInput.apply(keyState.real(), text);
+			// the widget is IMMEDIATELY rewritten to asterisks, so the secret is
+			// never rendered, never screenshotted and never copied out of the field
+			rewritingKeyField = true;
+			try {
+				keyField.setText(keyState.display());
+			} finally {
+				rewritingKeyField = false;
+			}
+			onDirty.run();
+		});
 		clearKeyButton = ButtonWidget.builder(Text.literal("清除密钥"), b -> {
 			if (!editable()) {
 				refuse();
@@ -91,9 +110,16 @@ public final class AiSettingsPanel {
 			}
 			if (store.clearKey()) {
 				keyStatus = "未配置";
-				status("§a已删除本机存储的 API Key（其余配置保留）");
+				clearKeyState();
+				refreshLabels();
+				// v0.4.0 review fix: reload the provider NOW. Without this the
+				// old credential could still be used for the next request even
+				// though the player just deleted it. In-flight requests keep the
+				// client they started with, but no NEW request can use the key.
+				host.applyToServer();
+				status("§a已删除本机存储的 API Key，Provider 已立即重载（旧凭据不再用于新请求）");
 			} else {
-				status("§c删除失败：无法写入配置文件");
+				status("§c删除失败：无法写入配置文件（旧凭据仍有效）");
 			}
 		}).position(x + w - 72, rowY).size(72, 18).build();
 		rowY += 26;
@@ -124,7 +150,21 @@ public final class AiSettingsPanel {
 
 	/** the API key field is never pre-filled, so a stored key is never echoed */
 	public String keyInput() {
-		return keyField == null ? "" : keyField.getText().trim();
+		return keyState.real().trim();
+	}
+
+	/** the masked key widget, for the automated GUI check */
+	public TextFieldWidget debugKeyField() {
+		return keyField;
+	}
+
+	/** diagnostics: the mask rendered by the widget, and the real length only */
+	public String debugKeyDisplay() {
+		return keyField == null ? "" : keyField.getText();
+	}
+
+	public int debugKeyRealLength() {
+		return keyState.real().length();
 	}
 
 	// ---------------------------------------------------------------- state
@@ -147,7 +187,7 @@ public final class AiSettingsPanel {
 		if (baseUrlField != null) {
 			baseUrlField.setText(baseUrl);
 			modelField.setText(model);
-			keyField.setText("");
+			clearKeyState();
 		}
 		refreshLabels();
 	}
@@ -200,6 +240,19 @@ public final class AiSettingsPanel {
 
 	private static String read(TextFieldWidget f, String fallback) {
 		return f == null ? fallback : f.getText().trim();
+	}
+
+	/** wipe the masked widget and the secret it mirrors */
+	private void clearKeyState() {
+		keyState = SecretInput.empty();
+		if (keyField != null) {
+			rewritingKeyField = true;
+			try {
+				keyField.setText("");
+			} finally {
+				rewritingKeyField = false;
+			}
+		}
 	}
 
 	private void refuse() {
@@ -259,9 +312,7 @@ public final class AiSettingsPanel {
 			return;
 		}
 		keyStatus = AgentConfig.keyIsPlaceholder(cfg.apiKey()) ? "未配置" : "已配置";
-		if (keyField != null) {
-			keyField.setText(""); // never keep a plaintext key in a widget
-		}
+		clearKeyState();
 		ui.markSettingsSaved();
 		// hot apply: the integrated server reloads in this JVM, no packets, no restart
 		host.applyToServer();
@@ -306,7 +357,8 @@ public final class AiSettingsPanel {
 						? "§7密钥仅保存在本机配置文件，不进入世界存档、不发送给其他玩家、日志已脱敏"
 						: "§7专用服务器模式：只读。请在服务器端用安全途径配置",
 				x, y + 14, 0x909090);
-		ctx.drawTextWithShadow(tr, "§7密钥状态：" + keyStatus + "（不回显任何字符）", x, y + h - 40, 0xA0A0A0);
+		ctx.drawTextWithShadow(tr, "§7密钥状态：" + keyStatus + " · 输入框已掩码显示（不回显任何字符）",
+				x, y + h - 40, 0xA0A0A0);
 		ctx.drawTextWithShadow(tr, clip(statusLine, w), x, y + h - 26, 0xFFFFFF);
 	}
 

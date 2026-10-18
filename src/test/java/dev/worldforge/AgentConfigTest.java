@@ -328,6 +328,62 @@ class AgentConfigTest {
 		}
 	}
 
+	// ------------------------------------------------- masked key input
+
+	@Test
+	void typedKeyIsMaskedInTheWidget() {
+		// the field only ever holds asterisks; the secret lives in panel state
+		var s1 = dev.worldforge.ai.SecretInput.apply("", "s");
+		assertEquals("s", s1.real());
+		assertEquals("*", s1.display());
+		assertTrue(dev.worldforge.ai.SecretInput.isMasked(s1.display()));
+
+		var s2 = dev.worldforge.ai.SecretInput.apply(s1.real(), s1.display() + "k");
+		assertEquals("sk", s2.real());
+		assertEquals("**", s2.display());
+
+		// pasting a whole key behaves like typing it
+		String typed = "sk-live-SECRET-abcdef";
+		var pasted = dev.worldforge.ai.SecretInput.apply("", typed);
+		assertEquals(typed, pasted.real());
+		assertEquals(dev.worldforge.ai.SecretInput.mask(typed.length()), pasted.display());
+		assertEquals(typed.length(), pasted.display().length(), "one asterisk per character");
+		assertFalse(pasted.display().contains("SECRET"), "the widget text must not contain the secret");
+		assertFalse(pasted.display().contains("sk-"), "not even a key-shaped prefix");
+	}
+
+	@Test
+	void deletingRemovesFromTheSecretNotJustTheDisplay() {
+		var s1 = dev.worldforge.ai.SecretInput.apply("", "sk-abcdef");
+		assertEquals(9, s1.real().length());
+		var s2 = dev.worldforge.ai.SecretInput.apply(s1.real(), s1.display().substring(0, 5));
+		assertEquals("sk-ab", s2.real(), "backspace must shorten the real secret");
+		assertEquals("*****", s2.display());
+		var s3 = dev.worldforge.ai.SecretInput.apply(s2.real(), "");
+		assertEquals("", s3.real(), "clearing the field clears the secret");
+		assertEquals("", s3.display());
+	}
+
+	@Test
+	void aMidFieldEditCannotRevealOrCorruptTheSecret() {
+		String real = "sk-original-value";
+		String display = dev.worldforge.ai.SecretInput.display(real);
+		// user selects the middle and types something (non-prefix change)
+		String mangled = display.substring(0, 3) + "XY" + display.substring(5);
+		var s = dev.worldforge.ai.SecretInput.apply(real, mangled);
+		assertEquals(real, s.real(), "a non-prefix edit must not modify the stored secret");
+		assertEquals(display, s.display(), "the display snaps back to a correct mask");
+		assertFalse(s.display().contains("XY"), "typed characters must never be echoed");
+	}
+
+	@Test
+	void displayFormNeverLeaksAKey() {
+		assertEquals("", dev.worldforge.ai.SecretInput.display(""));
+		assertEquals("***", dev.worldforge.ai.SecretInput.display("abc"));
+		assertFalse(dev.worldforge.ai.SecretInput.display(SECRET).contains(SECRET));
+		assertFalse(dev.worldforge.ai.SecretInput.display(SECRET).contains("sk-"));
+	}
+
 	// ---------------------------------------------------------------- helpers
 
 	private static int freePort() {

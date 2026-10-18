@@ -261,6 +261,55 @@ public class WorldForgeAgentTests {
 						Map.of("range", 12.0), 40))));
 	}
 
+	/**
+	 * A12 (v0.4.0 review fix): removing the credential must take effect on the
+	 * NEXT request without restarting. The GUI does this by clearing the file and
+	 * asking the server thread to rebuild the provider; this test drives the same
+	 * swap at the bridge level and proves the old provider is gone.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-ai-config")
+	public void testA12_clearedKeyDisablesAgentImmediately(TestContext ctx) {
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity op = ctx.createMockCreativeServerPlayerInWorld();
+		var sink = new Sink(new CopyOnWriteArrayList<>());
+		AgentBridge.OUTCOME_SINK = sink;
+		AgentBridge.attachProviderForTesting(MockModelProvider.canned("{\"kind\":\"query\",\"what\":\"x\"}"),
+				cfg(30));
+		try {
+			ctx.assertTrue(AgentBridge.available(), "with a configured key the agent is available");
+			ctx.assertTrue(AgentBridge.providerDescription() != null, "a provider must be present");
+
+			// ---- the GUI path: key removed on disk, provider rebuilt ----
+			AgentBridge.attachProviderForTesting(null, AgentConfig.DISABLED);
+			ctx.assertTrue(!AgentBridge.available(), "after clearing the key the agent must be unavailable");
+			ctx.assertTrue(AgentBridge.providerDescription() == null,
+					"the old provider must be dropped, not merely disabled");
+			ctx.assertTrue(!AgentBridge.config().usable(), "the config must report itself unusable");
+
+			// and the very next request is refused locally instead of using the
+			// deleted credential
+			int before = sink.got().size();
+			AgentBridge.chat(server, op, "还能用吗");
+			ctx.waitAndRun(20, () -> {
+				try {
+					ctx.assertTrue(sink.got().size() > before, "the refusal must be delivered");
+					var o = sink.got().get(before);
+					ctx.assertTrue(!o.ok() && o.text().contains("agent.json"),
+							"the next request must be refused with guidance, got: " + o.text());
+				} finally {
+					AgentBridge.OUTCOME_SINK = null;
+					disconnectQuiet(op);
+					ctx.complete();
+				}
+			});
+		} catch (Throwable t) {
+			AgentBridge.OUTCOME_SINK = null;
+			disconnectQuiet(op);
+			ctx.assertTrue(false, "unexpected: " + t);
+			ctx.complete();
+		}
+	}
+
 	private static void disconnectQuiet(ServerPlayerEntity p) {
 		try {
 			p.networkHandler.disconnect(Text.literal("ai test done"));

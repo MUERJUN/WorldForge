@@ -1246,6 +1246,7 @@ public class WorldForgeStudioScreen extends Screen {
 			case "damage" -> damageField;
 			case "durability" -> durabilityField;
 			case "ai" -> aiPanel.input();
+			case "settings_key" -> settingsPanel.debugKeyField();
 			default -> null;
 		};
 	}

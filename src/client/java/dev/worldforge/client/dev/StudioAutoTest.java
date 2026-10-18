@@ -233,19 +233,53 @@ public final class StudioAutoTest {
 							sp != null && (sp.debugStatusLine().contains("服务器")
 									|| sp.debugStatusLine().contains("本机")));
 					// the key input must never be pre-filled with a stored key
-					var keyField = findField(s, "密钥:");
+					var keyField = s == null ? null : s.debugField("settings_key");
 					check("key input is empty on entry (no echo of a stored key)",
 							keyField == null || keyField.getText().isEmpty());
+
+					// v0.4.0 review fix: a NEWLY typed key must be masked in the
+					// widget itself (the old code only avoided pre-filling).
+					String fakeKey = "sk-autotest-FAKE-KEY-0123456789";
+					if (keyField != null && sp != null) {
+						keyField.setText(fakeKey);
+						wait(2);
+						String rendered = keyField.getText();
+						check("typed key is masked in the widget (P0 secret fix)",
+								dev.worldforge.ai.SecretInput.isMasked(rendered));
+						check("mask length matches the typed key",
+								rendered.length() == fakeKey.length());
+						check("no fragment of the typed key is rendered",
+								!rendered.contains("sk-") && !rendered.contains("FAKE"));
+						check("panel kept the real key in state only",
+								sp.debugKeyRealLength() == fakeKey.length());
+						check("status/debug strings never contain the key",
+								!sp.debugStatusLine().contains("FAKE")
+										&& !sp.debugKeyStatus().contains("FAKE"));
+					} else {
+						check("key field present for the masking check", false);
+					}
 					shot(client, "15-ai-settings-readonly");
 				}
 				case 15 -> {
 					var s = studio(client);
+					// the key we typed made the page dirty: the first 返回 must be
+					// intercepted by the draft guard, the second one discards
 					click(client, s, "« 返回");
 					wait(8);
-					check("settings page returns to the list", s != null && s.debugMode().equals("LIST"));
-					shot(client, "16-back-from-settings");
+					check("unsaved settings are guarded on the first back press",
+							s != null && s.debugMode().equals("AI_SETTINGS"));
+					shot(client, "16-settings-guard");
 				}
 				case 16 -> {
+					var s = studio(client);
+					click(client, s, "« 返回");
+					wait(8);
+					check("second back press discards the settings draft",
+							s != null && s.debugMode().equals("LIST"));
+					check("settings draft flag cleared", s != null && !s.debugState().settingsDirty());
+					shot(client, "17-back-from-settings");
+				}
+				case 17 -> {
 					finish(client);
 				}
 				default -> {
@@ -316,33 +350,6 @@ public final class StudioAutoTest {
 			}
 		}
 		fail("button not found or not clickable: " + label);
-	}
-
-	/** locate a TextFieldWidget by placeholder prefix (semantic, not positional) */
-	private static TextFieldWidget findField(WorldForgeStudioScreen screen, String placeholderPrefix) {
-		if (screen == null) {
-			return null;
-		}
-		for (Element e : screen.children()) {
-			if (e instanceof TextFieldWidget f && f.visible) {
-				String ph = placeholderText(f);
-				if (ph != null && ph.startsWith(placeholderPrefix)) {
-					return f;
-				}
-			}
-		}
-		return null;
-	}
-
-	private static String placeholderText(TextFieldWidget f) {
-		try {
-			var m = TextFieldWidget.class.getDeclaredMethod("getPlaceholder");
-			m.setAccessible(true);
-			Object v = m.invoke(f);
-			return v == null ? null : v.toString();
-		} catch (Exception e) {
-			return null;
-		}
 	}
 
 	private void shot(MinecraftClient client, String name) {
