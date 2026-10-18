@@ -74,7 +74,8 @@ public final class WorldForgeCommand {
 								.executes(ctx -> reload(ctx.getSource())))
 						.then(CommandManager.literal("demo")
 								.requires(s -> s.hasPermissionLevel(2))
-								.executes(ctx -> demo(ctx.getSource())))));
+								.executes(ctx -> demo(ctx.getSource())))
+						.then(dev.worldforge.command.BlockCommand.build())));
 	}
 
 	private static String cid(CommandContext<ServerCommandSource> ctx) {
