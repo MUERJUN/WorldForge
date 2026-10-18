@@ -62,15 +62,15 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 | Studio 方块 UI | ✅ 真实客户端 | 自动化钩子 + 截图 |
 | 世界内方块渲染 | ✅ 真实客户端 | 截图 v040-world-blocks-view.png |
 | 客户端镜像同步 | ✅ 真实客户端 | SyncDefinitions blocksJson 字段 |
-| 真实区块卸载/重载 | ⬜ 未验证 | GameTest 无法触发私有卸载 API |
-| 生存模式世界内掉落 | ⬜ 未验证 | mock 玩家固定创造模式 |
+| 真实区块卸载/重载 | ✅ GameTest | CL1-CL3 (setChunkForced API) |
+| 生存模式破坏掉落 | ⚠️ 部分 | SB1-SB2: shouldDrop rule + drop identity verified; in-world survival break pending |
 
 ### 已知限制
 
 - 所有虚拟方块共用一个原生方块类型：碰撞形状/硬度/光照/红石行为无法逐定义改变。
 - 超载时周期被拉长为 `ceil(N/128)` tick：保证最终执行与每 tick 有界，不保证原始周期。
-- 真实区块卸载/重载循环尚未验证。
-- 生存模式世界内掉落尚未验证。
+- 真实区块卸载/重载循环已验证（CL1-CL3）。
+- 生存模式世界内掉落：shouldDrop 规则和掉落物身份已验证；完整生存交互列为已知限制。
 
 ---
 
