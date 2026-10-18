@@ -1,303 +1,208 @@
-# WorldForge — Minecraft 运行时动态物品引擎 + 游戏内可视化编辑器 + AI AgentBridge (v0.3.0)
+# WorldForge — Minecraft 运行时动态物品与方块引擎 + 游戏内 Studio + AI AgentBridge
 
 [![build](https://img.shields.io/badge/build-passing-brightgreen)]() [![MC](https://img.shields.io/badge/Minecraft-1.21.1-green)]() [![Loader](https://img.shields.io/badge/Fabric-Loader%200.16.9-blue)]()
 
-WorldForge 的目标是成为 Minecraft 游戏内的 AI Mod 开发环境：玩家安装一个 JAR，就能在游戏里用自然语言创造物品、方块、实体和规则，实时测试并导出独立 Mod。
-
-**当前版本 MVP 0.1 只完成一个核心技术验证：仅注册一个通用原生 Item，即可在游戏运行期间创建任意多个（验证了 10 种）具有不同虚拟 ID、名称、外观、属性和行为的物品，并完整支持运行时热修改、世界级持久化与退出重进恢复。**
+WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，在游戏里用自然语言或可视化编辑器创造物品和方块，实时测试并导出独立 Mod。
 
 - 游戏版本：Minecraft Java **1.21.1**
 - 加载器：Fabric Loader **0.16.9** + Fabric API **0.116.5+1.21.1**
-- 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**（distributionUrl 已指向腾讯镜像，可改回 services.gradle.org）
+- 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**
+- 当前版本：**v0.3.2 已发布**；**v0.4.0 开发中**（动态方块引擎）
 
 ---
 
-## 一·三、v0.3.2 — GUI 稳定性与「游戏内自动化测试」
+## 快速开始
 
-**三项 GUI 修复**（均为可回归验证）：
-1. **AI 请求不再卡死**：只有请求真正交给传输层才进入"思考中"；空输入/请求在飞/无服务端分别即时提示；被拒 ack、模型失败、75s 看门狗、断线**全部恢复输入**。
-2. **草稿保护全覆盖**：列表点击、AI 面板、外观选择、删除确认、返回列表、关闭按钮、ESC 全部经过同一守卫；带未保存修改进入 AI 面板会先警告；不再用状态栏文本判断业务状态。
-3. **取消与退出解耦**：取消提案先是本地操作（服务端不可达也能取消），再尽力而为通知；关闭永远以关闭收尾。
+```bash
+./gradlew build           # 编译 + JUnit 88 项
+./gradlew runGameTest     # 真实服务端 GameTest 51 项
+./gradlew runClient       # 进游戏：按 K 打开 Studio
+```
 
-**游戏内自动化 GUI 测试（无需人工按键）**：
+安装：把 `build/libs/worldforge-0.4.0.jar` + Fabric API 放入 `.minecraft/mods`。
+
+---
+
+## v0.4.0 — 动态方块引擎（开发中）
+
+### 核心机制：虚拟方块
+
+启动期只注册 **1 个通用原生方块** `worldforge:dynamic_block` + 1 个 BlockEntity 类型 + 1 个 BlockItem。玩家的每个"虚拟方块"是它的实例，身份存于 BlockEntity 的 `VirtualBlockId` 字段，通过 NBT 持久化。
+
+### 已实现
+
+| 模块 | 说明 |
+|---|---|
+| `BlockDefinition` | 记录类：id/name/description/appearance/category/hardness/behaviors/tickIntervalTicks/outputItemId/outputCount |
+| `BlockCatalog` | 12 项原版外观封闭目录（stone/oak_planks/furnace/crafting_table/iron_block/gold_block/emerald_block/amethyst_block/redstone_lamp/bookshelf/barrel/deepslate_tiles） |
+| `BlockDefinitionStore` | blocks.json 持久化：严格加载拒绝整份损坏、容错逐条上报、原子写入、损坏隔离 |
+| `DynamicBlock` / `DynamicBlockEntity` | 放置写身份、破坏按玩家模式掉落（创造不掉）、右键分发行为、删除定义后失效可复活 |
+| `BlockRuntimeManager` | 服务端权威：失败回滚（定义与墓碑同时快照）、未绑定存储不假成功 |
+| `PeriodicScheduler` | 有界轮转调度：每 (world,pos) 最多一个任务、每 tick 硬上限 128、队列有界 8192 |
+| `BlockBehaviorEngine` | 白名单行为：apply_effect/heal/experience/ignite/give_item/sound/particles |
+| `WorldForgeBlockTools` | 统一变更入口，三段式结果（persisted/applied/sync） |
+| `/wf block` | help/list/info/create/give/delete，OP2 权限 |
+| `AgentBridge` | AI 方块提案：CreateBlock/UpdateBlock/DeleteBlock，类型严格隔离 |
+| `BlockStudioPanel` | Studio 方块分类页：列表/创建/编辑/删除/获取，外观与类型选择器 |
+| `DynamicBlockEntityRenderer` | 客户端渲染：复用原版方块模型，从客户端镜像解析外观 |
+| `ClientBlockState` | 客户端方块定义镜像，由 SyncDefinitions 同步 |
+
+### 验收状态
+
+| 验证项 | 状态 | 证据 |
+|---|---|---|
+| 方块定义创建与持久化 | ✅ GameTest | B1-B4, L1-L6 |
+| 放置→身份写入→破坏→重放 | ✅ GameTest | L1, L2 |
+| 热修改对已放置方块生效 | ✅ GameTest | L4 |
+| 删除后失效与重建复活 | ✅ GameTest | B3, L4 |
+| 跨存档隔离 | ✅ GameTest | L5 |
+| 损坏文件隔离 | ✅ GameTest | L6 |
+| 周期调度压力测试 | ✅ GameTest | R3-R5 (100/129/256/512) |
+| AI 方块提案端到端 | ✅ GameTest | A13, A14 |
+| Studio 方块 UI | ✅ 真实客户端 | 自动化钩子 + 截图 |
+| 世界内方块渲染 | ✅ 真实客户端 | 截图 v040-world-blocks-view.png |
+| 客户端镜像同步 | ✅ 真实客户端 | SyncDefinitions blocksJson 字段 |
+| 真实区块卸载/重载 | ⬜ 未验证 | GameTest 无法触发私有卸载 API |
+| 生存模式世界内掉落 | ⬜ 未验证 | mock 玩家固定创造模式 |
+
+### 已知限制
+
+- 所有虚拟方块共用一个原生方块类型：碰撞形状/硬度/光照/红石行为无法逐定义改变。
+- 超载时周期被拉长为 `ceil(N/128)` tick：保证最终执行与每 tick 有界，不保证原始周期。
+- 真实区块卸载/重载循环尚未验证。
+- 生存模式世界内掉落尚未验证。
+
+---
+
+## v0.3.2 — GUI 稳定性与游戏内自动化测试（已发布）
+
+### 三项 GUI 修复
+
+1. **AI 请求不再卡死**：只有请求真正交给传输层才进入"思考中"；空输入/请求在飞/无服务端分别即时提示；被拒 ack、模型失败、75s 看门狗、断线全部恢复输入。
+2. **草稿保护全覆盖**：列表点击、AI 面板、外观选择、删除确认、返回列表、关闭按钮、ESC 全部经过同一守卫。
+3. **取消与退出解耦**：取消提案先是本地操作，再尽力而为通知；关闭永远以关闭收尾。
+
+### 游戏内自动化 GUI 测试
 
 ```bash
 echo x > run/wf-autotest.flag     # 打开测试开关
-./gradlew runClient               # 真实客户端启动后自动跑完整 GUI 流程
-cat run/wf-autotest-report.txt    # 逐项 PASS/FAIL + 13 张真实帧截图
-rm run/wf-autotest.flag           # 关闭（正常游玩不受影响）
+./gradlew runClient               # 真实客户端自动跑完整 GUI 流程
+cat run/wf-autotest-report.txt    # 逐项 PASS/FAIL + 真实帧截图
+rm run/wf-autotest.flag           # 关闭
 ```
 
-该钩子**按控件文字语义定位**（不使用固定屏幕坐标），通过 Screen 的真实事件方法（`mouseClicked`/`keyPressed`/`charTyped`）驱动，从真实 GL 帧缓冲截图，并断言每帧绘制顺序必须是 `模糊 → 面板 → 控件`、每帧仅一次背景模糊。论证细节见 `docs/v032-client-autotest-report.txt`；清晰度量化工具见 `tools/sharpness_check.py`。
+---
 
-## 一·四、v0.3.0 — AI AgentBridge：自然语言创造物品
+## v0.3.0 — AI AgentBridge：自然语言创造物品
 
-**配置（服务器端一次性）**：编辑 `config/worldforge/agent.json`（首次启动自动生成模板）：
+### AI 配置（游戏内 GUI）
+
+按 K 打开 Studio → 点「⚙ AI 设置」→ 在游戏内配置 API Key、Provider、Base URL、Model。**不再需要手动编辑 agent.json**。
+
+也支持直接编辑 `config/worldforge/agent.json`：
 
 ```json
 {
   "enabled": true,
   "baseUrl": "https://api.deepseek.com/v1",
   "model": "deepseek-chat",
-  "apiKey": "粘贴你的 KEY"
+  "apiKey": "你的 KEY"
 }
 ```
 
-支持任何 OpenAI 兼容接口（OpenAI / DeepSeek / 本地网关…）。API Key 只存服务端配置文件：不进世界存档、不发给客户端、日志自动掩码。未配置时 AI 面板显示启用指引，可视化编辑器不受影响。
+API Key 只存服务端配置文件：不进世界存档、不发给客户端、日志自动掩码。
 
-**使用流程**：
+### 使用流程
 
-1. 按 K 打开 Studio → 点「✦ AI 创造面板」。
-2. 输入：`创建雷霆之剑，攻击力 12，右键召唤闪电，冷却 5 秒。`
-3. AI 返回**结构化提案预览**（名称/ID/外观/伤害/耐久/技能/冷却 + 变更差异），此时世界数据未发生任何变化。
-4. 点「确认应用」→ 服务端复核 OP2 权限与参数 → 经 WorldForgeTools 统一管线创建并落盘；点「取消」则零副作用。
-5. 确认后自动跳到该物品的编辑视图 → 「获取测试」→ ESC 关闭直接玩。
-6. 继续对话：`把伤害改成 20，冷却改成 2 秒。` → AI 识别现有物品做**差量修改**（未提及的属性/技能保持不变），退出重进后定义仍然恢复。
+1. 按 K 打开 Studio → 点「✦ AI 创造面板」
+2. 输入：`创建雷霆之剑，攻击力 12，右键召唤闪电，冷却 5 秒`
+3. AI 返回结构化提案预览（此时世界数据未变）
+4. 点「确认应用」→ 服务端复核权限与参数 → 创建并落盘
+5. 确认后自动跳到编辑视图 → 「获取测试」→ ESC 关闭直接玩
 
-**安全边界**：模型只能产出白名单内的提案（触发器/动作/数值范围/原版贴图目录）；不支持的能力（如飞行）会如实报告限制而不是假装成功；提案过期、被他人抢先修改（冲突检测）、重复提交（幂等）都有明确处理。架构与威胁模型详见 [docs/AGENTBRIDGE.md](docs/AGENTBRIDGE.md)。
+### 方块提案（v0.4.0）
 
-## 一·五、v0.2.0 — WorldForge Studio 游戏内可视化编辑器
+AI 也能创建方块：`创建一个魔法熔炉，外观像熔炉，周期性生成铁锭`。物品与方块是不同类型，即使 ID 相同也不能跨类型误修改。
 
-按 K（可在原版控制设置里改键）打开 **WorldForge Studio**：
+---
 
-```text
-┌─────────────────────────────────────────────┐
-│ WorldForge Studio            当前世界（单人）│
-├────────────┬────────────────────────────────┤
-│ 物品列表    │  名称/ID/描述 输入框            │
-│ (图标+滚动) │  伤害 | 耐久                    │
-│            │  外观: [钻石剑]（原版槽位选择器）│
-│ ● 未保存   │  触发: right_click  动作: 闪电  │
-│            │  参数 | 冷却tick                 │
-│            │  [保存][＋加入行为][获取测试][删除]│
-├────────────┴────────────────────────────────┤
-│ 状态栏：已同步服务端列表 · 10 个物品          │
-└─────────────────────────────────────────────┘
+## v0.2.0 — WorldForge Studio 游戏内可视化编辑器
+
+按 K 打开 Studio。支持物品列表、创建/编辑/删除、外观选择（15 个原版贴图槽位）、行为配置、获取测试、AI 面板、AI 设置、方块分类。
+
+---
+
+## 命令
+
+```
+/wf help                          — 帮助
+/wf list                          — 列出所有物品定义
+/wf info <id>                     — 查看物品详情
+/wf create <id> <name>            — 创建物品
+/wf give <id>                     — 获取物品
+/wf setdamage <id> <value>        — 修改攻击力
+/wf delete <id>                   — 删除物品定义
+/wf reload                        — 重载定义
+/wf demo                          — 创建 10 种演示物品
+
+/wf block help                    — 方块命令帮助
+/wf block list                    — 列出所有方块定义
+/wf block info <id>               — 查看方块详情
+/wf block create <id> <name> [appearance] [category] — 创建方块
+/wf block give <id>               — 获取方块物品
+/wf block delete <id>             — 删除方块定义
 ```
 
-操作流程：`＋创建物品 → 填 ID/名称 → 选外观（15 个原版贴图槽位目录）→ 填伤害/耐久 → 配触发+动作+参数+冷却 → ＋加入行为 → 保存 → 获取测试 → ESC 关闭直接玩`。
+写操作需要 OP2 权限。
 
-设计要点（对应验收原则）：
-- **GUI 是纯视图层**：所有修改走 C2S `studio_request` → 服务端复核 OP2 权限（与 `/wf` 写命令同阈值，GUI 永远拿不到更高权限）→ 服务端全量校验（ID 形状/长度上限/数值范围/行为白名单）→ **WorldForgeTools 统一管线**（与命令、未来 AI Agent 同一入口）→ 落盘（失败回滚）→ 背包存量堆热重烘 → 权威快照回包。
-- **草稿模型**：敲键盘不写盘；「保存」才提交；未保存标记 + 返回时二次确认防误丢；ID 创建后不可改（防引用漂移）。
-- **反馈完整**：加载/保存中/成功/失败（权限、参数、持久化、同步 PARTIAL/FAILED 分开呈现）；请求带 requestId，过期回包直接丢弃不覆盖新编辑；5 秒超时解除锁定并提示"刷新核对而非盲目重发"。
-- **联机安全**：连到没装 WorldForge 的服务器时显示只读提示、不发送任何请求；断线清空客户端状态。
-- 删除定义弹确认页，明确说明"删除定义 ≠ 删除背包物品，存量进入失效标记，重建同名 ID 自动恢复"。
+---
 
-## 一、快速开始
-
-### 构建
-
-```bash
-# 需要 JDK 21
-./gradlew build
-# 产物：build/libs/worldforge-0.1.0.jar
-```
-
-### 运行
-
-```bash
-# 真实游戏内 GameTest（无需图形界面，自动跑 A~H 全套验收测试）
-./gradlew runGameTest
-
-# 普通客户端（配合 K 键？GUI 面板暂未实现，用命令即可）
-./gradlew runClient
-
-# 普通专用服务端
-./gradlew runServer
-```
-
-### 游戏内验收流程（对应最终验收标准）
-
-1. 安装 `worldforge-0.1.0.jar` + Fabric API 到 `.minecraft/mods`，或 `./gradlew runClient`；
-2. 进入世界，`/wf demo` —— 一键创建 10 种虚拟物品（**不重启**）；
-3. `/wf give thunder_sword`、`/wf give healing_staff` …… 获取物品；
-4. 背包里 10 种物品名称、描述、贴图外观、攻击伤害、耐久、附魔闪光各不相同；右键/攻击触发技能并有冷却提示；
-5. `/wf setdamage thunder_sword 20` —— **背包里已有的那把剑立即变为 20 攻**（tooltip 与玩家属性同步更新）；
-6. 退出世界再进入：`/wf list` 定义仍在；旧物品堆仍显示正确的名称、外观和行为；
-7. `/wf delete thunder_sword` 后背包里的旧剑显示红色“已失效”状态，不崩溃、不被删除；
-8. 换一个存档进入：定义互相隔离（每个世界的 `worldforge/items.json` 独立）。
-
-## 二、架构
+## 架构
 
 ```text
 src/main/java/dev/worldforge/
-├── WorldForge.java            # ModInitializer：组件→物品→网络→事件→命令，注册顺序固定
-├── registry/WorldForgeItems   # 唯一原生 Item 注册：worldforge:dynamic_item
-├── component/                 # 数据组件（真实 1.21.1 Data Components 机制）
-│   ├── VirtualId              #   worldforge:virtual_id —— 堆的虚拟身份（持久化+网络同步）
-│   ├── BehaviorState          #   worldforge:behavior_state —— 堆级冷却状态
-│   └── WorldForgeComponents   #   ComponentType 注册（Codec + PacketCodec）
-├── definition/                # 纯 JVM 数据层（可脱离 MC 单元测试）
-│   ├── ItemDefinition         # 统一虚拟物品模型：版本/id/名称/描述/贴图/属性/行为
-│   ├── BehaviorDefinition     # trigger + actions[] + parameters + cooldown_ticks
-│   ├── TextureSource          # vanilla/mod/generated/custom（后两者降级到默认槽位）
-│   ├── AppearanceSlots        # 15 个预置外观槽位 + 原版贴图智能匹配
-│   └── DefinitionValidator    # 校验 + 默认值 + 贴图容错
-├── runtime/WorldForgeRuntimeManager # create/get/update/delete/list/reload/save，tombstone 失效标记
-├── persistence/DefinitionStore      # 世界目录 worldforge/items.json：原子写、损坏隔离、逐条容错
-├── behavior/BehaviorEngine    # 白名单行为分发：right_click/hit_entity × 8 种动作，服务端线程
-├── network/WorldForgePayloads # S2C 定义快照同步（登录时 + 每次修改后）
-├── command/                   # /wf help|list|info|create|give|setdamage|delete|reload|demo
-│   └── DemoDefinitions        # 10 种演示物品（普通运行时定义，非原生注册）
-├── item/DynamicItem           # 通用物品：名称/tooltip 每次从定义实时解析；属性/槽位烘焙到堆
-├── event/WorldForgeEvents     # 服务器生命周期 + 玩家加入；只注册一次（防重复监听）
-├── test/WorldForgeGameTests   # Fabric GameTest：验收测试 A~H，真实服务端运行
-└── extension/ExtensionPoints  # 未来扩展点说明（Project/Block/Entity/Asset/Agent/Exporter）
+├── WorldForge.java               # ModInitializer
+├── registry/                     # 原生注册：dynamic_item + dynamic_block
+├── component/                    # 数据组件：VirtualId + VirtualBlockId
+├── definition/                   # 物品定义模型
+├── block/                        # 方块定义模型 + 运行时 + 调度 + 行为
+│   ├── BlockDefinition           #   方块定义记录
+│   ├── BlockCatalog              #   12 项原版外观封闭目录
+│   ├── BlockDefinitionStore      #   blocks.json 持久化
+│   ├── DynamicBlock              #   通用代理方块
+│   ├── DynamicBlockEntity        #   BlockEntity：身份 + NBT + 周期注册
+│   ├── BlockRuntimeManager       #   服务端权威管理器
+│   ├── PeriodicScheduler         #   有界轮转调度
+│   └── BlockBehaviorEngine       #   白名单行为分发
+├── tool/                         # 统一工具层
+│   ├── WorldForgeTools           #   物品工具
+│   └── WorldForgeBlockTools      #   方块工具
+├── ai/                           # AgentBridge + 提案 + 校验
+├── network/                      # S2C 同步 + Studio 协议
+├── command/                      # /wf 命令树
+├── studio/                       # StudioUiState 状态机
+└── test/                         # GameTest 验收测试
 
-src/client/java/dev/worldforge/client/  # 客户端：接收定义同步（名称/tooltip 渲染）
-src/main/resources/
-├── fabric.mod.json            # 三个入口点：main / client / fabric-gametest
-└── assets/worldforge/
-    ├── models/item/dynamic_item.json    # 基础模型 + 15 条 custom_model_data 覆盖
-    ├── models/item/wf_slot_1..15.json   # parent 直接指向原版模型（复用原版贴图，零 PNG 拷贝）
-    └── lang/zh_cn.json, en_us.json
+src/client/java/dev/worldforge/client/
+├── WorldForgeClient.java         # 客户端初始化
+├── ClientBlockState.java         # 客户端方块定义镜像
+├── render/DynamicBlockEntityRenderer.java  # 方块实体渲染器
+├── gui/                          # Studio 屏幕 + AI 面板 + 方块面板
+└── dev/StudioAutoTest.java       # 游戏内自动化测试
 ```
 
-### 核心机制说明
+---
 
-**1. 单物品 + 虚拟身份**
-原生注册表里只有一个 `worldforge:dynamic_item`（测试 A 在真实注册表上断言数量 == 1）。每个物品堆通过自定义数据组件 `worldforge:virtual_id`（String，带 Codec 持久化 + PacketCodec 网络同步）携带自己的虚拟 ID。**没有**预注册 10 个 Item，**没有**注册表冻结后的强注册 hack，**不是**只改显示名称——伤害/耐久/攻速通过堆上的 `ATTRIBUTE_MODIFIERS`、`MAX_DAMAGE`、`CUSTOM_MODEL_DATA` 等标准数据组件真实生效。
+## 测试
 
-**2. 热修改模型**
-显示名、描述、tooltip 在每次读取时从运行时管理器实时解析——改名/改描述立刻对所有存量物品堆生效。数值属性（伤害、耐久）和外观槽位因为原版从堆组件读取，采用“烘焙 + 重刷”策略：定义更新时对所有玩家背包执行幂等的 `refreshStack`（`/wf setdamage`、加入世界、重载定义时都会触发），存量堆即刻使用新属性。
-
-**3. 外观 = 预置槽位 + 原版贴图复用**
-1.21.1 的真实机制：`dynamic_item.json` 模型上声明 15 条 `custom_model_data` 覆盖谓词（已在反编译的 `ModelOverrideList`/`ModelPredicateProviderRegistry` 源码核实）。槽位模型 `parent` 直接引用原版物品模型（`minecraft:item/diamond_sword` 等），因此**复用原版贴图、未复制任何 PNG**。定义里的 `texture.source` 支持 `vanilla/mod/generated/custom`；未实现的来源自动降级：**贴图问题永远不会导致物品创建失败**。多个虚拟物品可以共用槽位，身份完全独立。
-> 诚实声明：这是 JAR 内预置外观槽位（15 个），不是无限动态贴图。运行时生成纹理/动态资源包属于后续 AssetManager 里程碑。
-
-**4. 行为引擎 = 白名单解释器**
-监听入口只在 `DynamicItem`（一个原生 Item 类）上注册一次；运行时新增的定义经由这些既有入口分发。触发器 `right_click`/`hit_entity` × 动作 `summon_lightning/apply_effect/heal/teleport/explosion/experience/ignite/damage`，参数来自 JSON。不执行任何生成代码。安全限制：爆炸威力钳制 0.1~4.0 且默认无火、闪电限 48 格内、传送限 64 格且搜索安全落点、效果时长/等级钳制。世界修改全部在 `Item#use`/`postHit` 的服务端线程路径上执行。
-
-**5. 持久化 = 世界目录级隔离**
-每个存档的 `worldforge/items.json`（`{version, items[]}`）。写入采用临时文件 + 原子 move；文件损坏时移入 `items.json.broken-<ts>` 保留证据并以空集继续（下次保存成功）；单条非法定义逐条跳过。堆的身份靠数据组件随物品 NBT 一起保存，重进世界自动恢复。服务器启动时加载、停服时保存；客户端镜像通过 S2C 同步。
-
-**6. 失效状态**
-删除定义后，存量堆保留虚拟 ID 但获得 tombstone：名称显示 `§6[已失效]§r xxx`、tooltip 红字说明、右键返回 FAIL 并提示，不崩溃、不销毁物品（测试 F）。以相同 ID 重建定义后堆自动恢复功能。
-
-## 二·四、v0.1.2 深度修复迭代（3 项 P1）
-
-第二轮源码审读发现的三个问题，同样遵循"先复现 → 回归测试修复前失败 → 修复 → 全量重跑"：
-
-| # | 问题（源码路径复现） | 修复 | 回归验证 |
-|---|---|---|---|
-| 1 | **跨世界状态泄漏（P1 状态隔离）**：`resolveDefinition` 先查服务端静态 map 再查镜像；集成服务端退出只 save 不清态 → 退出单人世界 A（含 `worldforge:magic_sword`）后加入多人服 B（同名不同定义）时，客户端可能读到 A 的残留定义。风险由代码路径推断，未经真实客户端目测复现（如实标注） | 显示与逻辑彻底分道：`definitionForLogic()` 只读服务端权威态（行为分发/堆重烘）；`resolveForClientDisplay()` 只读镜像；客户端 JVM 内显示一律走镜像。新增 `SERVER_STOPPED` 时 `onServerStopped()` 清空服务端全部静态状态（定义/墓碑/store 绑定） | `testR7`（A 态释放 + B 镜像独立 + 逻辑不被镜像污染）；R5 同步强化为双向隔离断言 |
-| 2 | **同步失败被吞（P1 操作一致性）**：`broadcast()` 捕获异常仅记日志，调用方仍得 `ok=true`——把"落盘成功"与"运行时已应用/客户端已收到"混为一谈，AI Agent 无法决定重试 | `ToolResult` 拆成三段：`persisted`（磁盘事务）/ `applied`（服务端重烘堆）/ `sync`（OK/PARTIAL/FAILED/NONE），并给出 `needsRetry()`；`resync()` 提供不改定义的重驱动入口；命令层把 PARTIAL/FAILED 显式提示给玩家 | `testR9`（成功三段、磁盘失败三段全诚实、回滚值仍权威、resync 恢复） |
-| 3 | **损坏文件 reload 过激（P1 存档安全）**：`load()` 解析失败即隔离文件返回空表，`reloadDefinitions()` 先清空运行时再装载 → 运行中 `/wf reload` 遇到损坏文件会**抹掉全部当前定义**，停服还可能把空集合写回盘 | 新增无副作用 `tryLoad()`（失败返回 `LoadResult.failed`，绝不动玩家文件）；reload 走保守路径：读取失败 → 运行时保持原样 + 返回失败结果 + 文件不隔离不改动，由玩家决定恢复；世界**首次启动**路径保留原隔离行为（新会话可从干净保存开始） | `testR8` 在 **v0.1.1 真实服务端上先行运行得到 FAILED**（`corrupt-file reload must NOT wipe live definitions (count was 0)`，日志存档 `docs/evidence-r8-failed-on-v0.1.1.log`），修复后 PASSED；`testR10` 断言 tryLoad 零副作用 |
-
-**GameTest 总数升至 19 项（旧 15 + R7/R8/R9/R10），全部在真实专用服务端通过。**
-
-## 二·五、v0.1.1 修复迭代（严格 triage）
-
-按严重程度完成六项修复，全部遵循"**先复现 → 新增在修复前失败的回归测试 → 修复 → 全量重跑**"流程：
-
-| # | 问题（v0.1.0 实际源码复现） | 修复 | 回归测试（修复前结果 → 修复后结果） |
-|---|---|---|---|
-| 1 | **保存失败假成功**：`createItem` 先改内存再 `save()`，`save()` 返回 false 被无视 → 内存/磁盘永久分歧，命令仍报“创建成功” | 变更=先落盘、失败即回滚（含 tombstone 还原）并返回带 `lastError` 原因的失败结果；`SERVER_STOPPING` 最终落盘失败会打 ERROR 日志；命令层向玩家显示保存失败 | `testR1`、`testR1b`（用目录占据 items.json 路径确定性制造写失败）**修复前 FAILED → 修复后 PASSED** |
-| 2 | **客户端/服务端共享静态全局**：集成服务端（单人游戏，同一 JVM）里 S2C 同步写回同一个静态 `DEFINITIONS/TOMBSTONES`，可清空服务端墓碑与定义 | 新增 `ClientDefinitionMirror`（仅客户端写入）；显示路径“服务端优先、镜像兜底”；`refreshStack` 只信服务端权威；同步 payload 扩展 tombstone 列表 | `testR2`（镜像写入后断言服务端墓碑仍在、且不反 leak）**修复前 FAILED → 修复后 PASSED**；`testR5` 覆盖 payload 编解码往返 + 纯客户端镜像显示 |
-| 3 | **变更入口分散**：命令直接调 manager、各自散落 sync/refresh 调用，未来 AI Agent 无统一安全面 | 新建 `dev.worldforge.tool.WorldForgeTools` 唯一变更入口（校验→回滚式变更→重烘堆→广播同步一体完成）；`/wf` 全部写命令与 demo 改走工具层；AgentBridge 将来直接绑定这些方法 | 由既有 B/D/E/F/G/H + 新增 R 系列共同覆盖工具路径 |
-| 4 | **失效物品残留攻击力**：删除定义后 `refreshStack` 对无定义堆直接 return，+12 攻击加成、原外观槽位、耐久全部留在堆上 | 无效堆剥离 `ATTRIBUTE_MODIFIERS`、外观回退默认槽位、耐久钳制；虚拟 ID 保留（可恢复）；广播时连同光标槽一起重烘 | `testR3`（删除后断言属性修改器消失）**修复前 FAILED → 修复后 PASSED** |
-| 5 | **缺真实端到端**：技能只测了 ActionResult，无实体/效果断言；无重启进程恢复、无网络层测试 | 新增 `testR4`（真实 mock ServerPlayerEntity：治疗实际回血、冷却实际拦截、速度效果真实挂上、经验球真实生成/吸收、闪电实体真实出现）、`testR5`（PacketCodec 线级往返）；跨进程重启恢复通过持久 run 目录两次连续运行取证（第二次启动日志 `loaded N definitions` 来自第一次落盘文件） | 修复后 14/14 GameTest PASSED（含以上全部） |
-| 6 | **Release 与源码不一致**：核查发现 v0.1.0 tag 指向 commit `cb9cadb`，但 Release 附件 JAR 由之后的 HEAD（`604edde`，删除了 `ClientDefinitionCache`）构建 → tag≠产物 | 建立 `verify-release` 规程：对目标 tag 干净检出→独立构建→SHA-256 比对；v0.1.1 tag 起严格执行并在 `docs/RELEASE_VERIFICATION.md` 记录校验值；v0.1.0 差异以本条记录在案，不回改历史 | 见 docs/RELEASE_VERIFICATION.md（v0.1.1 全流程留痕） |
-
-**诚实说明**：#5 的“客户端视觉（背包图标差异）”“多人服务器联机同步”已实现代码路径并有 wire 级测试，但**尚未在真实图形客户端/双开联机环境人工目测验证**，见“未验证清单”。
-
-## 三、测试与验证结果
-
-| 测试 | 内容 | 验证方式 | 结果 |
-|---|---|---|---|
-| （编译） | 全源集 main/client/test 编译（v0.1.1） | `./gradlew clean build` | ✅ 编译验证通过 |
-| （单测） | 持久化层 9 项纯 JVM 测试：往返/缺失文件/损坏隔离/逐条容错/校验器/贴图降级/默认值/不可变更新/S2C 一致性 | `./gradlew test`（JUnit 5） | ✅ 9/9 通过 |
-| A | 原生注册表只有 1 个 worldforge Item | GameTest @ 真实服务端 | ✅ 通过 |
-| B | 运行中创建 10 种物品，无需重启 | GameTest @ 真实服务端 | ✅ 通过 |
-| C | 10 种 ID/名称互异、≥4 种外观槽位、行为差异、堆上身份互异 | GameTest @ 真实服务端 | ✅ 通过 |
-| D | 伤害 12→20 后**存量堆**属性即时更新 | GameTest @ 真实服务端 | ✅ 通过 |
-| E | 定义文件往返 + 物品堆 NBT 身份往返 | GameTest @ 真实服务端 | ✅ 通过 |
-| F | 删除定义 → 存量堆失效态、不崩溃、行为 FAIL | GameTest @ 真实服务端 | ✅ 通过 |
-| G | 3× reload 计数稳定为 10、双重注册事件为 no-op | GameTest @ 真实服务端 | ✅ 通过 |
-| H | 真实世界目录写入 `world/worldforge/items.json` 并重载 | GameTest @ 真实服务端 | ✅ 通过（日志+落盘文件为证） |
-| R1/R1b | 写失败必须失败返回 + 内存回滚，旧文件不受损（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过（修复前 FAILED 留档） |
-| R2 | 客户端镜像写入不得破坏服务端墓碑/状态（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过（修复前 FAILED 留档） |
-| R3 | 删除定义后存量堆不得残留攻击加成（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过（修复前 FAILED 留档） |
-| R4 | 治疗/冷却/速度效果/经验/闪电在真实 mock 玩家身上生效（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过 |
-| R5 | S2C payload 线级编解码往返 + 纯客户端镜像显示路径（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过 |
-| R6 | 多人同步（服务端半程）：真实加入玩家的同步快照经线级 codec 后镜像含定义+墓碑，发送路径不抛错（v0.1.1） | GameTest @ 真实服务端 | ✅ 通过（客户端屏幕渲染仍需人工 runClient 目测） |
-| R7 | 跨世界隔离：SERVER_STOPPED 清空服务端静态态；客户端显示只读镜像；逻辑只读权威态（v0.1.2） | GameTest @ 真实服务端 | ✅ 通过 |
-| R8 | 损坏文件 reload 不得清空运行时、不得隔离玩家文件、重存仍含活动定义（v0.1.2） | GameTest @ 真实服务端 | ✅ 通过；**在 v0.1.1 代码上先行运行得到 FAILED（count was 0），取证日志 `docs/evidence-r8-failed-on-v0.1.1.log`** |
-| R9 | 三段结果诚实性：persisted/applied/sync 互不掩盖；盘败回滚后旧值权威；resync 重试（v0.1.2） | GameTest @ 真实服务端 | ✅ 通过 |
-| R10 | tryLoad 零文件系统副作用（v0.1.2） | GameTest @ 真实服务端 | ✅ 通过 |
-
-### 验收清单逐项状态（7 项，如实分级）
-
-| 项 | 状态 | 验证级别 |
+| 测试 | 数量 | 方式 |
 |---|---|---|
-| 干净 Fabric 1.21.1 客户端能够启动 | ✅ 已验证（v0.2.0） | `./gradlew runClient` 在带显示器的 Windows 主机真实启动：LWJGL 3.3.3 渲染、声音引擎、资源加载完成，进入单人世界；日志含 `WorldForge ready … client init done (studio key = K)`；玩家在游戏内执行 `/wf demo` 成功创建 10 件并落盘 `saves/New World/worldforge/items.json`（11 条含行为 JSON） |
-| `/wf demo` 后 10 种物品正常出现 | ✅ 自动化等价 | testB/testC 以 `DemoDefinitions.createAll()` 断言 10 项互异定义创建成功；命令回显到聊天栏未目测 |
-| 不同外观槽位在背包中正确显示 | ✅ 数据层 / ⬜ 视觉层 | testC 断言 ≥4 互异 custom_model_data 槽位写入堆；背包图标实际渲染需 runClient 目测 |
-| 右键技能可以在游戏中实际触发 | ✅ GameTest | testR4 真实 mock 玩家：回血、冷却拦截、速度效果挂身、经验球/闪电实体真实出现在世界中 |
-| 修改攻击力后旧物品正确更新 | ✅ GameTest | testD 存量堆 12→20 即时生效；testR3 删除后加成剥离 |
-| 退出游戏重新进入，物品完整恢复 | ✅ 自动化等价 | testE/H：定义文件往返 + 堆 NBT 身份往返 + 真实世界目录落盘重载，且跨两次独立进程运行取证；同机客户端目测未做 |
-| 不同世界以及单人转多人时没有定义串扰 | ✅ 结构修复+测试 / ⬜ 联机目测 | 目录隔离 testH；v0.1.2 #1 已按路径消除集成态泄漏并有 testR7 不变量断言；双开真实联机目测未做
+| JUnit | 88 项 | `./gradlew test` |
+| GameTest | 51 项 | `./gradlew runGameTest` |
+| 客户端自动化 | 24 步 | `./gradlew runClient`（需 flag） |
 
-> 汇总：v0.1.2 `runGameTest` 输出 **All 19 required tests passed**（8 基础 + 7 项 v0.1.1 回归 + R7–R10 项 v0.1.2 回归）；v0.1.2 tag 全新克隆独立复跑同样 19/19。
-> R1/R1b/R2/R3 在 v0.1.0 代码上运行得到 **FAILED**（错误信息与上表逐条对应），修复后转 **PASSED** —— 回归有效性已实证。
-> **已在真实 Minecraft 专用服务端（Fabric + Yarn 映射）验证**；下列“未验证清单”如实列出尚未人工确认的内容。
+GameTest 覆盖：物品创建/修改/删除/持久化/同步/行为/失效/跨存档隔离/损坏恢复 + 方块定义/放置/身份/破坏/热修改/失效/调度压力/AI 提案端到端/类型隔离。
 
-### 未验证清单（不谎报）
-- 客户端启动与命令路径已在真实图形客户端验证（v0.2.0）；**K 键 Studio 界面的像素级目测**（布局/滚动/选择器/输入焦点）仍待人工确认 —— 自动化无法可靠驱动桌面窗口输入，不谎报。
-- 多人（专用服务端 + 真实客户端加入）下的同步与失效显示端到端目测 —— wire 级 codec + 服务端快照测试（R5/R6）通过，双开人工目测未做。
-- "单人世界 A 退出 → 进多人服 B"的真实客户端串扰复现 —— 属代码路径推断的风险（用户报告原话如此），v0.1.2 已从结构上消除（镜像只读 + STOPPED 清态）并有 R7 不变量测试；未做真实双场景目测。
-- K 键 GUI 面板 —— 明确未实现（非 MVP 目标）。
+---
 
-## 四、已实现 / 未实现清单
-
-**已实现（MVP 0.1 验收范围内全部完成）**
-- 单一通用 Item + Data Component 虚拟身份
-- ItemDefinition 数据模型（版本字段、校验、默认值、错误处理）
-- WorldForgeRuntimeManager 全部 7 项能力
-- 运行时热创建/修改/删除，无需重启；存量堆热生效
-- 删除后的可识别失效状态（不崩溃、不丢物品）
-- 10 种演示物品（剑×3、法杖×5、护符×2）含 8 种白名单动作
-- 预置外观槽位 + 原版贴图智能匹配 + 三级回退（AI→原版→默认，当前无 AI 即走原版）
-- 世界目录级持久化、版本化、原子写、损坏恢复、存档隔离
-- S2C 定义同步（客户端名称/tooltip 正确渲染）
-- `/wf` 全套命令 + 权限分级（写操作 OP2）
-- JUnit + Fabric GameTest 双自动化测试体系
-
-**未实现（明确不在 MVP 0.1 范围）**
-- K 键 GUI 面板（用 `/wf list/info` 覆盖同等功能）
-- AI 生图、运行时动态资源包（`generated/custom` 贴图来源仅解析并降级）
-- 真实 LLM Agent / DSH 接入 / 导出独立 JAR
-- 动态方块、动态实体（扩展点已文档化于 `extension/ExtensionPoints.java`）
-
-## 五、已知技术限制
-
-1. **外观槽位有限（15）**：超出后不同物品可能共享槽位；1.21.1 无 `item_model` 数据组件（1.21.3+ 才有），采用 `custom_model_data` 覆盖，方案已在源码级核实。
-2. **数值属性依赖“重刷”**：定义变更后存量堆靠幂等 `refreshStack` 更新（背包/命令路径均触发）；若方块容器、其他实体持有该堆，在其下次被玩家持有/登录刷新时同步。显示名/tooltip 无此限制，实时解析。
-3. **max_stack 全局为 1**：基物品是耐久工具形态（maxDamage 组件），堆叠数属性暂未逐定义生效（会破坏耐久语义）。
-4. **冷却状态存于堆组件**：堆被拆分/合并时冷却随堆实例走，属可接受的 MVP 语义。
-5. **行为执行需玩家持有者**：`right_click` 需要玩家上下文（发射器等非玩家场景 MVP 直接 PASS）。
-6. **tombstone 是运行期内存态**：重进世界后失效物品仍显示“未定义”（灰）而非“已失效”（黄）；物品本身与虚拟 ID 均完好。
-7. **GameTest 在专用服务端验证**：客户端 GUI 渲染（图标外观差异）需人工开 `runClient` 目测确认。
-
-## 六、下一阶段建议
-
-- **动态方块（BlockDefinition）**：1.21.1 原生方块注册表同样冻结，可行路线是“通用代理方块 + BlockEntity + 状态组件”或研究运行时注册解冻时机；先做数据模型与持久化对齐 Item 侧。
-- **动态实体**：属性/行为数据驱动，实体类型仍走原生（或通用 NPC 代理）。
-- **AssetManager**：把槽位目录变成运行时分配 + 临时资源包挂载 + `client.reloadResources`；AI 生图通过它写入，失败自动回落到现有 vanilla 链。
-- **AgentBridge**：`/wf` 命令树几乎就是工具面——建议定义 JSON-RPC/工具描述（create_item/update_item/list…），LLM 只调工具、不触字节码；写操作默认进“草稿”状态，由玩家确认落盘。
-- **ModExporter**：definitions.json + 槽位资源直接可导出为数据包/资源包，独立 JAR 需 Loom 子工程方案。
-
-## 七、开发与复现
-
-```bash
-git clone https://github.com/MUERJUN/WorldForge
-cd WorldForge
-./gradlew build          # 编译 + JUnit
-./gradlew runGameTest    # 真实服务端验收测试（26 项：A-H + R1-R12 + S1-S4 + AI 端到端链）
-./gradlew runClient      # 进游戏手测：/wf demo → /wf give …
-```
-
-版本依赖均与官方 fabric-example-mod 的 1.21.1 分支核对过（loom 1.12.7 / loader 0.16.9 / yarn 1.21.1+build.3 / FAPI 0.116.5，另有网络原因使用镜像说明见 `gradle.properties`）。
-
-License: MIT
+## License: MIT

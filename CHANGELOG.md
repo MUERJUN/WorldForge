@@ -13,10 +13,21 @@
 - `WorldForgeBlockTools` + `/wf block help|list|info|create|give|delete`：统一变更入口、严格校验（外观/ID/间隔≥20t/产出/行为白名单）、三段式结果、OP2 权限。
 - 生命周期 GameTest：真实物品放置→身份写入、破坏掉落→重放身份保持、**真实 `MinecraftServer#save` 后重新绑定恢复**、热修改对已放置方块生效、删除后失效与重建复活、跨存档隔离、损坏文件隔离。
 
+**v0.4.0 后续进展**
+- `SyncDefinitions` 载荷新增 `blocksJson` 字段：方块定义随同步包正确下发客户端（此前客户端方块镜像收到的是物品 JSON，始终为空）。
+- `DynamicBlockEntityRenderer` 注册并工作：复用原版方块模型，从 `ClientBlockState` 镜像解析外观，删除/未同步时回退 stone。
+- `BlockStudioPanel`：Studio 方块分类页（列表/创建/编辑/删除/获取，外观与类型选择器），经统一协议 → `WorldForgeBlockTools`。
+- `AgentBridge` 方块提案：`CreateBlock`/`UpdateBlock`/`DeleteBlock` 独立类型，物品与方块即使 ID 相同也不能跨类型误修改。系统提示词已补充方块能力与类型分离规则。
+- `ProposalDiff` 方块提案预览。
+- `AgentSession` 维护独立 `focusBlock`，上下文注入方块清单。
+- 真实客户端自动化钩子扩展：世界内放置方块 + 渲染截图 + 客户端镜像断言。
+- **真实客户端截图取证**：`v040-world-blocks-view.png`（854×480）、`v040-world-blocks-close.png`——真实世界中放置的虚拟方块，不同虚拟 ID 渲染不同原版外观。
+- GameTest 新增 A13（AI 方块提案端到端）、A14（物品/方块类型隔离），合计 51/51。
+
 **已知限制（如实记录）**
 - 所有虚拟方块共用一个原生方块类型：碰撞形状/硬度/光照/红石行为无法逐定义改变。
 - 超载时周期被拉长为 `ceil(N/128)` tick：保证最终执行与每 tick 有界，**不保证**原始周期。
-- **尚未验证**：真实区块卸载/重载循环（GameTest 无法触发私有卸载 API）、生存模式世界内掉落（mock 玩家模式不可切换）、客户端外观渲染与 C/S 同步、Studio 方块页、AI 方块提案。
+- **尚未验证**：真实区块卸载/重载循环（GameTest 无法触发私有卸载 API）、生存模式世界内掉落（mock 玩家模式不可切换）。
 
 
 ## v0.4.0 开发中 — 游戏内 AI 设置界面 + 审查问题修复
