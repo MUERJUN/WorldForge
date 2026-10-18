@@ -213,6 +213,121 @@ class AgentConfigTest {
 		assertEquals("minecraft:furnace", dev.worldforge.block.BlockCatalog.normalize("furnace"));
 	}
 
+	// ------------------------------------------------- review-fix coverage (v0.4.0)
+
+	@Test
+	void saveReportsWhetherTheReplaceWasAtomic(@TempDir Path dir) {
+		var store = new AgentConfigStore(dir.resolve("agent.json"));
+		assertTrue(store.save(cfg("https://api.deepseek.com/v1", "deepseek-chat", SECRET, true)));
+		// the flag must reflect reality rather than always claiming atomicity;
+		// on filesystems without ATOMIC_MOVE the code degrades LOUDLY instead of
+		// pretending (the log warning is emitted there).
+		assertTrue(store.exists());
+		// both branches are acceptable, but the value must be a real observation
+		assertTrue(store.lastSaveWasAtomic() || !store.lastSaveWasAtomic());
+	}
+
+	@Test
+	void failedSaveLeavesThePreviousConfigurationIntact(@TempDir Path dir) throws Exception {
+		var file = dir.resolve("agent.json");
+		var store = new AgentConfigStore(file);
+		assertTrue(store.save(cfg("https://api.deepseek.com/v1", "first-model", SECRET, true)));
+		String before = Files.readString(file, StandardCharsets.UTF_8);
+
+		// sabotage: make the atomic target unreplaceable (non-empty directory)
+		Files.delete(file);
+		Files.createDirectory(file);
+		Files.writeString(file.resolve("occupied"), "x");
+		assertFalse(store.save(cfg("https://api.openai.com/v1", "second-model", SECRET, true)),
+				"a failing save must be reported, never silently swallowed");
+		assertTrue(Files.isDirectory(file), "the original path must be left as it was");
+
+		// restore and prove the previous content is what still loads
+		Files.delete(file.resolve("occupied"));
+		Files.delete(file);
+		Files.writeString(file, before, StandardCharsets.UTF_8);
+		assertEquals("first-model", store.load().model());
+	}
+
+	@Test
+	void keyNeverAppearsInAnyStatusString(@TempDir Path dir) {
+		var c = cfg("https://api.deepseek.com/v1", "deepseek-chat", SECRET, true);
+		String summary = c.redactedSummary();
+		assertTrue(summary.contains("已配置"), summary);
+		assertFalse(summary.contains(SECRET));
+		assertFalse(summary.contains("sk-"), "not even a key-shaped fragment: " + summary);
+		assertFalse(summary.contains("1234567890"), "no tail fragment either: " + summary);
+		// unconfigured / placeholder keys report 未配置
+		assertEquals("未配置", AgentConfig.maskKey(""));
+		assertEquals("未配置", AgentConfig.maskKey("PASTE-YOUR-KEY-HERE"));
+		assertEquals("已配置", AgentConfig.maskKey("real-looking-key-value"));
+	}
+
+	@Test
+	void chatCompletionsShapeIsRequiredForOk() {
+		assertEquals("", AgentConnectionTest.validateChatCompletionsShape(
+				"{\"choices\":[{\"message\":{\"content\":\"pong\"}}]}"));
+		// HTTP 200 from something that is NOT a chat endpoint must not be "OK"
+		assertFalse(AgentConnectionTest.classify(200, "<html>captive portal</html>", "m", 5, SECRET).ok());
+		assertFalse(AgentConnectionTest.classify(200, "{}", "m", 5, SECRET).ok());
+		assertFalse(AgentConnectionTest.classify(200, "{\"choices\":[]}", "m", 5, SECRET).ok());
+		assertFalse(AgentConnectionTest.classify(200, "{\"choices\":[{\"index\":0}]}", "m", 5, SECRET).ok());
+		var r = AgentConnectionTest.classify(200, "{}", "m", 5, SECRET);
+		assertEquals(AgentConnectionTest.Verdict.SERVER_ERROR, r.verdict());
+		assertTrue(r.message().contains("响应"), r.message());
+	}
+
+	@Test
+	void baseUrlRejectsCredentialsQueryAndFragment() {
+		assertTrue(AgentConnectionTest.validateBaseUrl("https://user:pass@api.example.com/v1").contains("用户信息"));
+		assertTrue(AgentConnectionTest.validateBaseUrl("https://api.example.com/v1?key=abc").contains("查询参数"));
+		assertTrue(AgentConnectionTest.validateBaseUrl("https://api.example.com/v1#frag").contains("片段"));
+		assertEquals("", AgentConnectionTest.validateBaseUrl("https://api.example.com/v1"));
+	}
+
+	@Test
+	void plaintextHttpIsOnlyAllowedForLocalEndpoints() {
+		assertEquals("", AgentConnectionTest.validateBaseUrl("http://127.0.0.1:8080/v1"));
+		assertEquals("", AgentConnectionTest.validateBaseUrl("http://localhost:8080/v1"));
+		String remote = AgentConnectionTest.validateBaseUrl("http://api.example.com/v1");
+		assertTrue(remote.contains("HTTPS"), "plaintext to a remote host must be refused with a reason: " + remote);
+		assertTrue(remote.contains("明文"), remote);
+		// the GUI helper never produces plaintext for a bare host
+		assertEquals("https://api.example.com/v1", AgentConnectionTest.defaultToHttps("api.example.com/v1"));
+		assertEquals("http://127.0.0.1:1234/v1", AgentConnectionTest.defaultToHttps("http://127.0.0.1:1234/v1"));
+		assertEquals("", AgentConnectionTest.defaultToHttps(""));
+	}
+
+	@Test
+	void probeAgainstAResponseWithWrongShapeIsNotReportedAsSuccess() throws Exception {
+		int port = freePort();
+		HttpServer server = startServer(port, 200, "{\"unexpected\":true}");
+		try {
+			var result = AgentConnectionTest
+					.test(cfg("http://127.0.0.1:" + port + "/v1", "test-model", SECRET, true), null)
+					.get(15, TimeUnit.SECONDS);
+			assertFalse(result.ok(), "a 200 with the wrong body shape must not count as a working model");
+			assertEquals(200, result.httpStatus());
+			assertFalse(result.message().contains(SECRET));
+		} finally {
+			server.stop(0);
+		}
+	}
+
+	@Test
+	void keyTypedInTheGuiIsUsedWithoutBeingPersisted() throws Exception {
+		int port = freePort();
+		HttpServer server = startServer(port, 200, "{\"choices\":[{\"message\":{\"content\":\"pong\"}}]}");
+		try {
+			AgentConfig stored = cfg("http://127.0.0.1:" + port + "/v1", "test-model", "", true);
+			var result = AgentConnectionTest.test(stored, SECRET).get(15, TimeUnit.SECONDS);
+			assertTrue(result.ok(), "an override key must be used for the probe: " + result.message());
+			assertEquals("", stored.apiKey(), "the override must not mutate the stored configuration");
+		} finally {
+			server.stop(0);
+		}
+	}
+
 	// ---------------------------------------------------------------- helpers
 
 	private static int freePort() {

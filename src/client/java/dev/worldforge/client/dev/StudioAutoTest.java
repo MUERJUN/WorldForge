@@ -208,6 +208,44 @@ public final class StudioAutoTest {
 					shot(client, "13-reopened");
 				}
 				case 13 -> {
+					// v0.4.0 P0: AI settings page
+					var s = studio(client);
+					click(client, s, "⚙ AI 设置");
+					wait(12);
+					check("AI settings page opens", s != null && s.debugMode().equals("AI_SETTINGS"));
+					var sp = s == null ? null : s.debugSettings();
+					check("settings panel constructed", sp != null);
+					shot(client, "14-ai-settings");
+				}
+				case 14 -> {
+					var s = studio(client);
+					var sp = s == null ? null : s.debugSettings();
+					check("provider selector present", sp != null && sp.debugProvider() != null);
+					// with no integrated server (title screen / dedicated client) the
+					// page must be READ-ONLY: no key can be read or written locally.
+					check("settings page is read-only without a local server",
+							sp != null && !sp.debugEditable());
+					check("key state never exposes a fragment",
+							sp != null && (sp.debugKeyStatus().equals("未配置")
+									|| sp.debugKeyStatus().equals("已配置")
+									|| sp.debugKeyStatus().equals("服务器管理")));
+					check("read-only page explains who manages the key",
+							sp != null && (sp.debugStatusLine().contains("服务器")
+									|| sp.debugStatusLine().contains("本机")));
+					// the key input must never be pre-filled with a stored key
+					var keyField = findField(s, "密钥:");
+					check("key input is empty on entry (no echo of a stored key)",
+							keyField == null || keyField.getText().isEmpty());
+					shot(client, "15-ai-settings-readonly");
+				}
+				case 15 -> {
+					var s = studio(client);
+					click(client, s, "« 返回");
+					wait(8);
+					check("settings page returns to the list", s != null && s.debugMode().equals("LIST"));
+					shot(client, "16-back-from-settings");
+				}
+				case 16 -> {
 					finish(client);
 				}
 				default -> {
@@ -278,6 +316,33 @@ public final class StudioAutoTest {
 			}
 		}
 		fail("button not found or not clickable: " + label);
+	}
+
+	/** locate a TextFieldWidget by placeholder prefix (semantic, not positional) */
+	private static TextFieldWidget findField(WorldForgeStudioScreen screen, String placeholderPrefix) {
+		if (screen == null) {
+			return null;
+		}
+		for (Element e : screen.children()) {
+			if (e instanceof TextFieldWidget f && f.visible) {
+				String ph = placeholderText(f);
+				if (ph != null && ph.startsWith(placeholderPrefix)) {
+					return f;
+				}
+			}
+		}
+		return null;
+	}
+
+	private static String placeholderText(TextFieldWidget f) {
+		try {
+			var m = TextFieldWidget.class.getDeclaredMethod("getPlaceholder");
+			m.setAccessible(true);
+			Object v = m.invoke(f);
+			return v == null ? null : v.toString();
+		} catch (Exception e) {
+			return null;
+		}
 	}
 
 	private void shot(MinecraftClient client, String name) {

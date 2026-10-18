@@ -54,25 +54,80 @@ public final class AgentConfigStore {
 		return load();
 	}
 
-	/** atomic save; the key is written to disk only, never to a log line */
+	/**
+	 * Save the configuration with a verifiable atomic replace.
+	 *
+	 * <p>Order of operations (each step matters for secrecy):</p>
+	 * <ol>
+	 *   <li>the temp file is created and RESTRICTED <em>before</em> any byte of
+	 *       the key is written, so there is no window in which a
+	 *       world-readable file contains the secret;</li>
+	 *   <li>the content is written and flushed;</li>
+	 *   <li>the temp file replaces the target with
+	 *       {@link StandardCopyOption#ATOMIC_MOVE} so a reader never observes a
+	 *       partially written configuration;</li>
+	 *   <li>if the filesystem does not support atomic moves, the code falls
+	 *       back to a plain {@code REPLACE_EXISTING} move and <em>reports that
+	 *       degradation explicitly</em> ({@link #lastSaveWasAtomic()} and a log
+	 *       line) instead of pretending atomicity.</li>
+	 * </ol>
+	 */
 	public boolean save(AgentConfig cfg) {
 		JsonObject o = toJson(cfg);
 		Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
 		try {
 			Files.createDirectories(file.getParent());
+			deleteQuietly(tmp);
+			createRestricted(tmp);
 			Files.writeString(tmp, o.toString(), StandardCharsets.UTF_8);
-			Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
-			restrictPermissions();
-			return true;
+			return replace(tmp, file);
 		} catch (IOException e) {
-			// log the failure WITHOUT the content (which contains the key)
 			dev.worldforge.WorldForge.LOGGER.error("[WorldForge] failed to write agent config: {}",
 					e.getClass().getSimpleName());
-			try {
-				Files.deleteIfExists(tmp);
-			} catch (IOException ignored) {
-			}
+			deleteQuietly(tmp);
 			return false;
+		}
+	}
+
+	/** true when the last successful save used an atomic replace */
+	public boolean lastSaveWasAtomic() {
+		return lastSaveWasAtomic;
+	}
+
+	private boolean lastSaveWasAtomic = false;
+
+	/** atomically replace the target, degrading loudly when unsupported */
+	private boolean replace(Path tmp, Path target) throws IOException {
+		try {
+			Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE);
+			lastSaveWasAtomic = true;
+			return true;
+		} catch (java.nio.file.AtomicMoveNotSupportedException | UnsupportedOperationException e) {
+			Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+			lastSaveWasAtomic = false;
+			dev.worldforge.WorldForge.LOGGER.warn(
+					"[WorldForge] filesystem does not support ATOMIC_MOVE; the config was replaced "
+							+ "non-atomically (a concurrent reader could observe a partial file)");
+			return true;
+		}
+	}
+
+	/** create the file with owner-only permissions BEFORE writing any secret */
+	private void createRestricted(Path p) throws IOException {
+		try {
+			Files.createFile(p, java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
+					java.util.Set.of(java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+							java.nio.file.attribute.PosixFilePermission.OWNER_WRITE)));
+		} catch (UnsupportedOperationException e) {
+			// Windows: no POSIX permissions; ACLs are inherited from the profile.
+			Files.createFile(p);
+		}
+	}
+
+	private static void deleteQuietly(Path p) {
+		try {
+			Files.deleteIfExists(p);
+		} catch (IOException ignored) {
 		}
 	}
 

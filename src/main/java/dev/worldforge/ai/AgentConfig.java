@@ -83,6 +83,14 @@ public record AgentConfig(
 				+ ", url=" + baseUrl + ", key=" + maskKey(apiKey) + ", enabled=" + enabled;
 	}
 
+	/** hosts for which plaintext HTTP is acceptable (development/local gateways) */
+	private static final java.util.Set<String> LOCAL_HOSTS = java.util.Set.of(
+			"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0");
+
+	public static boolean isLocalHost(String host) {
+		return host != null && LOCAL_HOSTS.contains(host.toLowerCase(java.util.Locale.ROOT));
+	}
+
 	public static final AgentConfig DISABLED = new AgentConfig(false,
 			"https://api.openai.com/v1", "gpt-4o-mini", "", 60, 1200, 1, 10, 12, 300);
 
@@ -93,14 +101,14 @@ public record AgentConfig(
 				+ ", apiKey=" + maskKey(apiKey) + ", timeout=" + timeoutSeconds + "s}";
 	}
 
+	/**
+	 * v0.4.0 review fix: report only WHETHER a key is configured. The previous
+	 * implementation printed a prefix/suffix (e.g. {@code sk-a…789}), which is
+	 * still a fragment of a live credential and could be correlated across
+	 * logs; no part of the key is exposed anywhere now.
+	 */
 	public static String maskKey(String key) {
-		if (key == null || key.isBlank()) {
-			return "<none>";
-		}
-		if (key.length() <= 8) {
-			return "****";
-		}
-		return key.substring(0, 4) + "…" + key.substring(key.length() - 3);
+		return keyIsPlaceholder(key) ? "未配置" : "已配置";
 	}
 
 	public boolean usable() {

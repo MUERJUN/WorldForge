@@ -41,7 +41,7 @@ import java.util.Map;
  */
 public class WorldForgeStudioScreen extends Screen {
 
-	public enum Mode { LIST, EDIT, CREATE, APPEAR_PICK, DELETE_CONFIRM, AI }
+	public enum Mode { LIST, EDIT, CREATE, APPEAR_PICK, DELETE_CONFIRM, AI, AI_SETTINGS }
 
 	/**
 	 * v0.3.2: the AUTHORITATIVE UI state machine. Every navigation, draft
@@ -75,6 +75,7 @@ public class WorldForgeStudioScreen extends Screen {
 
 	private List<ItemDefinition> rows = new ArrayList<>();
 	private AiStudioPanel aiPanel;
+	private AiSettingsPanel settingsPanel;
 
 	// appearance picker hit zones, rebuilt each frame
 	private final List<int[]> pickerZones = new ArrayList<>();
@@ -123,6 +124,7 @@ public class WorldForgeStudioScreen extends Screen {
 		backButton = button(rx, fy, rw, 16, "« 返回列表", b -> tryLeaveEditor());
 
 		button(x0 + 8, y0 + panelH - 66, lw, 18, "§d✦ AI 创造面板", b -> enterAi());
+		button(x0 + 8, y0 + panelH - 86, lw, 18, "§b⚙ AI 设置", b -> enterSettings());
 		button(x0 + 8, y0 + panelH - 46, lw, 18, "＋ 创建物品", b -> enterCreate());
 		button(x0 + 8, y0 + panelH - 26, lw / 2 - 2, 16, "刷新", b -> sendRequest("list", ""));
 		button(x0 + 8 + lw / 2 + 2, y0 + panelH - 26, lw / 2 - 2, 16, "关闭 (ESC)", b -> guardedClose());
@@ -155,6 +157,38 @@ public class WorldForgeStudioScreen extends Screen {
 			addDrawableChild(b);
 		}
 		addDrawableChild(aiPanel.input()); // v0.3.1 fix: focusable text field
+
+		settingsPanel = new AiSettingsPanel(ui, new AiSettingsPanel.Host() {
+			@Override
+			public java.nio.file.Path localConfigFile() {
+				// single player: client and integrated server share this JVM and
+				// this machine, so the file is read/written directly and the key
+				// never enters a network packet. Dedicated servers must provide
+				// no path here at all (the panel then stays read-only).
+				return client != null && client.getServer() != null
+						? net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir()
+								.resolve("worldforge").resolve("agent.json")
+						: null;
+			}
+
+			@Override
+			public void applyToServer() {
+				// hot apply inside this JVM: ask the server thread to rebuild the
+				// provider from the file (no packets, no restart)
+				var server = client == null ? null : client.getServer();
+				if (server != null) {
+					server.execute(() -> dev.worldforge.ai.AgentBridge.reloadConfig(server));
+				}
+			}
+		});
+		settingsPanel.init(x0 + 176, y0 + 24, panelW - 192, panelH - 56,
+				() -> ui.markSettingsDirty(), this::tryLeaveSettings);
+		for (var b : settingsPanel.buttons()) {
+			addDrawableChild(b);
+		}
+		for (var f : settingsPanel.fields()) {
+			addDrawableChild(f);
+		}
 
 		refreshDraftWidgets();
 		applyMode();
@@ -238,6 +272,25 @@ public class WorldForgeStudioScreen extends Screen {
 	private void applyMode() {
 		// v0.3.2: widget visibility is derived from the state machine so that
 		// drawing and interaction can never disagree.
+		if (ui.settingsVisible()) {
+			for (TextFieldWidget f : new TextFieldWidget[]{idField, nameField, descField, damageField,
+					durabilityField, param1, param2, cooldownField}) {
+				f.visible = false;
+			}
+			for (ButtonWidget b : new ButtonWidget[]{appearanceButton, triggerButton, actionButton,
+					saveButton, addButton, giveButton, deleteButton, backButton}) {
+				b.visible = false;
+			}
+			aiPanel.input().visible = false;
+			for (var b : aiPanel.buttons()) {
+				b.visible = false;
+			}
+			settingsPanel.applyVisibility(true);
+			return;
+		}
+		if (settingsPanel != null) {
+			settingsPanel.applyVisibility(false);
+		}
 		if (ui.aiVisible()) {
 			for (TextFieldWidget f : new TextFieldWidget[]{idField, nameField, descField, damageField,
 					durabilityField, param1, param2, cooldownField}) {
@@ -361,6 +414,21 @@ public class WorldForgeStudioScreen extends Screen {
 			return;
 		}
 		close();
+	}
+
+	/** open the settings page through the draft guard (same rules as the editor) */
+	private void enterSettings() {
+		if (!navigate(Mode.AI_SETTINGS, "§e当前有未保存内容：再点「⚙ AI 设置」将放弃")) {
+			return;
+		}
+		settingsPanel.load();
+		setSelectedField(settingsPanel.firstField());
+	}
+
+	private void tryLeaveSettings() {
+		if (navigate(Mode.LIST, "§eAI 设置尚未保存：再点「« 返回」将放弃修改")) {
+			setStatus("§7已离开 AI 设置");
+		}
 	}
 
 	private void enterAi() {
@@ -916,8 +984,30 @@ public class WorldForgeStudioScreen extends Screen {
 
 		renderListColumn(ctx, mouseX, mouseY);
 
+		if (ui.settingsVisible()) {
+			for (TextFieldWidget f : new TextFieldWidget[]{idField, nameField, descField, damageField,
+					durabilityField, param1, param2, cooldownField}) {
+				f.visible = false;
+			}
+			for (ButtonWidget b : new ButtonWidget[]{appearanceButton, triggerButton, actionButton,
+					saveButton, addButton, giveButton, deleteButton, backButton}) {
+				b.visible = false;
+			}
+			aiPanel.input().visible = false;
+			for (var b : aiPanel.buttons()) {
+				b.visible = false;
+			}
+			settingsPanel.applyVisibility(true);
+			return;
+		}
+		if (settingsPanel != null) {
+			settingsPanel.applyVisibility(false);
+		}
 		if (ui.aiVisible()) {
 			aiPanel.render(ctx, x0 + 176, y0 + 24, panelW - 192, panelH - 56);
+		}
+		if (ui.settingsVisible()) {
+			settingsPanel.render(ctx, x0 + 176, y0 + 24, panelW - 192, panelH - 56);
 		}
 
 		if (ui.dirty() && ui.editorVisible()) {
@@ -1158,6 +1248,11 @@ public class WorldForgeStudioScreen extends Screen {
 			case "ai" -> aiPanel.input();
 			default -> null;
 		};
+	}
+
+	/** the AI settings panel, for assertions in the automated check */
+	public AiSettingsPanel debugSettings() {
+		return settingsPanel;
 	}
 
 	/** the authoritative state machine, for assertions in the automated check */

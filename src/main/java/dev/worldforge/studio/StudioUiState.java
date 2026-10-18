@@ -30,7 +30,7 @@ import java.util.List;
  */
 public final class StudioUiState {
 
-	public enum Mode { LIST, EDIT, CREATE, APPEAR_PICK, DELETE_CONFIRM, AI }
+	public enum Mode { LIST, EDIT, CREATE, APPEAR_PICK, DELETE_CONFIRM, AI, AI_SETTINGS }
 
 	public enum AiPhase { IDLE, THINKING, PROPOSAL }
 
@@ -77,6 +77,7 @@ public final class StudioUiState {
 	private boolean closeArmed = false;
 	private boolean editorWasEditing = false;
 
+	private boolean settingsDirty = false;
 	private AiPhase aiPhase = AiPhase.IDLE;
 	private String pendingProposalId = null;
 	private String pendingDiff = "";
@@ -113,6 +114,25 @@ public final class StudioUiState {
 
 	public boolean aiVisible() {
 		return mode == Mode.AI;
+	}
+
+	public boolean settingsVisible() {
+		return mode == Mode.AI_SETTINGS;
+	}
+
+	// ---------------------------------------------------------- settings draft
+
+	public boolean settingsDirty() {
+		return settingsDirty;
+	}
+
+	public void markSettingsDirty() {
+		settingsDirty = true;
+	}
+
+	public void markSettingsSaved() {
+		settingsDirty = false;
+		discardArmed = false;
 	}
 
 	// ---------------------------------------------------------------- draft
@@ -171,12 +191,19 @@ public final class StudioUiState {
 			return Nav.IGNORED;
 		}
 		boolean leavingEditor = editorVisible() && target != Mode.EDIT && target != Mode.CREATE;
+		boolean leavingSettings = mode == Mode.AI_SETTINGS && target != Mode.AI_SETTINGS;
 		if (leavingEditor && dirty) {
 			if (!discardArmed) {
 				discardArmed = true;
 				return Nav.NEEDS_CONFIRM;
 			}
 			dirty = false;
+		} else if (leavingSettings && settingsDirty) {
+			if (!discardArmed) {
+				discardArmed = true;
+				return Nav.NEEDS_CONFIRM;
+			}
+			settingsDirty = false;
 		}
 		setMode(target);
 		return Nav.MOVED;
@@ -210,6 +237,10 @@ public final class StudioUiState {
 	 */
 	public Esc pressEsc() {
 		switch (mode) {
+			case AI_SETTINGS -> {
+				Nav nav = requestNavigation(Mode.LIST);
+				return nav == Nav.NEEDS_CONFIRM ? Esc.NEEDS_CONFIRM : Esc.MOVED;
+			}
 			case AI -> {
 				if (aiPhase == AiPhase.PROPOSAL || pendingProposalId != null) {
 					cancelProposalLocal();
@@ -239,7 +270,7 @@ public final class StudioUiState {
 	 * which closing is impossible (the reported "cannot exit" bug).
 	 */
 	public Esc requestClose() {
-		if (editorVisible() && dirty && !closeArmed) {
+		if ((editorVisible() && dirty || settingsVisible() && settingsDirty) && !closeArmed) {
 			closeArmed = true;
 			return Esc.NEEDS_CONFIRM;
 		}
@@ -437,6 +468,7 @@ public final class StudioUiState {
 		out.add("discardArmed=" + discardArmed);
 		out.add("closeArmed=" + closeArmed);
 		out.add("aiPhase=" + aiPhase);
+		out.add("settingsDirty=" + settingsDirty);
 		out.add("outstanding=" + aiOutstanding);
 		out.add("pending=" + (pendingProposalId == null ? "-" : pendingProposalId));
 		return out;
