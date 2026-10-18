@@ -81,7 +81,7 @@ public final class TemplateProjectGenerator {
 			if (def == null) continue;
 			var nativeId = nativeItemId(id);
 			testNum++;
-			sb.append("\t@GameTest(batchId = \"exported\")\n");
+			sb.append("\t@GameTest(templateName = \"fabric-gametest-api-v1:empty\", batchId = \"exported\")\n");
 			sb.append("\tpublic static void itemRegistered").append(testNum)
 					.append("(TestContext ctx) {\n");
 			sb.append("\t\tvar item = Registries.ITEM.get(Identifier.of(\"")
@@ -98,7 +98,7 @@ public final class TemplateProjectGenerator {
 			if (def == null) continue;
 			var nativeId = nativeBlockId(id);
 			testNum++;
-			sb.append("\t@GameTest(batchId = \"exported\")\n");
+			sb.append("\t@GameTest(templateName = \"fabric-gametest-api-v1:empty\", batchId = \"exported\")\n");
 			sb.append("\tpublic static void blockRegistered").append(testNum)
 					.append("(TestContext ctx) {\n");
 			sb.append("\t\tvar block = Registries.BLOCK.get(Identifier.of(\"")
@@ -121,7 +121,7 @@ public final class TemplateProjectGenerator {
 			modJson = modJson.replace(
 					"\"main\": [\"" + req.modId().replace("_", ".") + "." + mainClassName() + "\"]",
 					"\"main\": [\"" + req.modId().replace("_", ".") + "." + mainClassName() + "\"],\n"
-					+ "        \"test\": [\"" + req.modId().replace("_", ".") + ".ExportedModTest\"]");
+					+ "        \"fabric-gametest\": [\"" + req.modId().replace("_", ".") + ".ExportedModTest\"]");
 			Files.writeString(modJsonPath, modJson);
 		}
 	}
@@ -138,6 +138,15 @@ public final class TemplateProjectGenerator {
 
 				base {
 				    archivesName = project.archives_base_name
+				}
+
+				fabricApi {
+				    configureTests {
+				        modId = "%s"
+				        enableGameTests = true
+				        enableClientGameTests = false
+				        clearRunDirectory = true
+				    }
 				}
 
 				repositories {
@@ -174,7 +183,7 @@ public final class TemplateProjectGenerator {
 				        rename { "${it}" }
 				    }
 				}
-				""");
+				""".formatted(req.modId()));
 	}
 
 	private void writeLicense() throws IOException {
@@ -355,7 +364,6 @@ public final class TemplateProjectGenerator {
 		var sb = new StringBuilder();
 		sb.append("package ").append(pkg).append(";\n\n");
 		sb.append("import net.minecraft.block.Block;\n");
-		sb.append("import net.minecraft.block.Blocks;\n");
 		sb.append("import net.minecraft.item.BlockItem;\n");
 		sb.append("import net.minecraft.item.Item;\n");
 		sb.append("import net.minecraft.registry.Registries;\n");
@@ -371,7 +379,7 @@ public final class TemplateProjectGenerator {
 			var nativeId = nativeBlockId(id);
 			sb.append("\t\tvar ").append(field).append(" = Registry.register(Registries.BLOCK,\n");
 			sb.append("\t\t\t\tIdentifier.of(\"").append(req.modId()).append("\", \"").append(nativeId).append("\"),\n");
-			sb.append("\t\t\t\tnew Block(Block.Settings.copy(Blocks.").append(vanillaBaseBlock(def)).append(")));\n");
+			sb.append("\t\t\t\tnew Block(Block.Settings.create().strength(2.0f)));\n");
 			sb.append("\t\tRegistry.register(Registries.ITEM,\n");
 			sb.append("\t\t\t\tIdentifier.of(\"").append(req.modId()).append("\", \"").append(nativeId).append("\"),\n");
 			sb.append("\t\t\t\tnew BlockItem(").append(field).append(", new Item.Settings()));\n");
