@@ -1,5 +1,24 @@
 # 更新日志
 
+## v0.4.0 开发中 — 动态方块引擎
+
+**虚拟方块（不注册新方块）**：启动期只注册 1 个通用 `worldforge:dynamic_block` + 1 个 BlockEntity 类型 + 1 个方块物品；玩家的每个"虚拟方块"是它的实例，身份存于 BlockEntity（`worldforge:virtual_block_id` 数据组件 → 放置时写入 BE → NBT 持久化）。
+
+**已实现**
+- `BlockDefinition` / `BlockCatalog`（12 项原版外观封闭目录，严格校验与显示回退分离）/ `BlockDefinitionStore`（严格加载拒绝整份损坏、容错逐条上报、原子写入、损坏隔离）。
+- `DynamicBlock` / `DynamicBlockEntity` / `WorldForgeBlocks`：放置写身份、破坏按玩家模式掉落（创造不掉）、右键分发行为、删除定义后失效可复活。
+- `BlockBehaviorEngine`：只做通用方块真正能做之事（药水/治疗/经验/点燃/给予/音效/粒子），其余如实返回"未执行"。
+- `BlockRuntimeManager`：失败回滚（定义**与墓碑**）、未绑定存储**不假成功**、周期配额与清理。
+- `PeriodicScheduler`：**有界轮转调度**——每 (world,pos) 最多一个任务、每 tick 硬上限 128（永不提高）、队列有界 8192、执行后按下次到期时间回队尾、绑定维度与坐标、破坏/删定义/卸载/停服均清理。压力测试覆盖 100/129/256/512 个真实方块。
+- `WorldForgeBlockTools` + `/wf block help|list|info|create|give|delete`：统一变更入口、严格校验（外观/ID/间隔≥20t/产出/行为白名单）、三段式结果、OP2 权限。
+- 生命周期 GameTest：真实物品放置→身份写入、破坏掉落→重放身份保持、**真实 `MinecraftServer#save` 后重新绑定恢复**、热修改对已放置方块生效、删除后失效与重建复活、跨存档隔离、损坏文件隔离。
+
+**已知限制（如实记录）**
+- 所有虚拟方块共用一个原生方块类型：碰撞形状/硬度/光照/红石行为无法逐定义改变。
+- 超载时周期被拉长为 `ceil(N/128)` tick：保证最终执行与每 tick 有界，**不保证**原始周期。
+- **尚未验证**：真实区块卸载/重载循环（GameTest 无法触发私有卸载 API）、生存模式世界内掉落（mock 玩家模式不可切换）、客户端外观渲染与 C/S 同步、Studio 方块页、AI 方块提案。
+
+
 ## v0.4.0 开发中 — 游戏内 AI 设置界面 + 审查问题修复
 
 **游戏内 AI 设置（P0，Studio 新增「⚙ AI 设置」入口）**

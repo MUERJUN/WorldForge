@@ -145,9 +145,27 @@ public final class WorldForgeBlockTools {
 		return new Validation(errs, warns);
 	}
 
+	/**
+	 * Store the appearance as a canonical full id ("furnace" -> "minecraft:furnace")
+	 * so persisted data, comparisons and client rendering all agree.
+	 */
+	public static BlockDefinition canonical(BlockDefinition def) {
+		String canonicalAppearance = BlockCatalog.strictAppearance(def.appearance());
+		if (canonicalAppearance == null) {
+			return def; // leave invalid input untouched so validation can reject it
+		}
+		if (canonicalAppearance.equals(def.appearance())) {
+			return def;
+		}
+		return new BlockDefinition(def.version(), def.id(), def.name(), def.description(),
+				canonicalAppearance, def.category(), def.hardness(), def.behaviors(),
+				def.tickIntervalTicks(), def.outputItemId(), def.outputCount());
+	}
+
 	// ---------------------------------------------------------------- mutations
 
 	public static BlockToolResult createBlock(MinecraftServer server, BlockDefinition def) {
+		def = canonical(def);
 		Validation v = validate(def);
 		if (!v.ok()) {
 			return new BlockToolResult(false, false, SyncStatus.NONE, "校验失败：" + v.joined());
@@ -164,6 +182,7 @@ public final class WorldForgeBlockTools {
 	}
 
 	public static BlockToolResult updateBlock(MinecraftServer server, BlockDefinition def) {
+		def = canonical(def);
 		Validation v = validate(def);
 		if (!v.ok()) {
 			return new BlockToolResult(false, false, SyncStatus.NONE, "校验失败：" + v.joined());
