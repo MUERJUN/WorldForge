@@ -1,0 +1,104 @@
+[PASS] Studio opens with K-equivalent entry
+[SHOT] wf-autotest-01-01-list.png
+[PASS] list mode active
+[PASS] exactly one background blur per frame (P0)
+[PASS] paint order is blur -> panel -> widgets (P0)
+[INFO] frame trace = [background-blur, panel, widgets]
+[INFO] clicked '§d✦ AI 创造面板' at (96,167)
+[SHOT] wf-autotest-02-02-ai-panel.png
+[PASS] AI panel visible
+[PASS] chat input exists and is visible
+[SHOT] wf-autotest-03-03-ai-typed.png
+[INFO] clicked '发送' at (322,181)
+[PASS] send never leaves a stuck THINKING state
+[PASS] send button usable again
+[SHOT] wf-autotest-04-04-after-send.png
+[PASS] proposal preview shown
+[PASS] confirm button visible with a proposal
+[PASS] cancel button visible with a proposal
+[SHOT] wf-autotest-05-05-proposal-preview.png
+[INFO] clicked '取消' at (322,181)
+[PASS] cancel clears the proposal locally
+[PASS] panel returns to idle after cancel
+[SHOT] wf-autotest-06-06-after-cancel.png
+[PASS] ESC 1 leaves the AI panel
+[INFO] after ESC 1: mode=LIST screen=WorldForgeStudioScreen
+[SHOT] wf-autotest-07-07-esc-back-to-list.png
+[PASS] ESC 2 closes the editor
+[SHOT] wf-autotest-08-08-esc-closed.png
+[INFO] clicked '＋ 创建物品' at (96,187)
+[PASS] create mode entered
+[PASS] editing marks the draft dirty
+[SHOT] wf-autotest-09-09-create-dirty.png
+[INFO] clicked '« 返回列表' at (293,214)
+[PASS] first back press is blocked by the draft guard
+[SHOT] wf-autotest-10-10-draft-guard-warning.png
+[INFO] clicked '« 返回列表' at (293,214)
+[PASS] second back press discards and leaves
+[SHOT] wf-autotest-11-11-draft-discarded.png
+[INFO] clicked '关闭 (ESC)' at (137,206)
+[PASS] close button closes the editor
+[SHOT] wf-autotest-12-12-closed-by-button.png
+[PASS] Studio reopened for modal checks
+[SHOT] wf-autotest-13-13-reopened.png
+[INFO] clicked '§b⚙ AI 设置' at (96,147)
+[PASS] AI settings page opens
+[PASS] settings panel constructed
+[SHOT] wf-autotest-14-14-ai-settings.png
+[PASS] provider selector present
+[PASS] settings page is read-only without a local server
+[PASS] key state never exposes a fragment
+[PASS] read-only page explains who manages the key
+[PASS] key input is empty on entry (no echo of a stored key)
+[PASS] typed key is masked in the widget (P0 secret fix)
+[PASS] mask length matches the typed key
+[PASS] no fragment of the typed key is rendered
+[PASS] panel kept the real key in state only
+[PASS] status/debug strings never contain the key
+[SHOT] wf-autotest-15-15-ai-settings-readonly.png
+[INFO] clicked '« 返回' at (220,189)
+[PASS] unsaved settings are guarded on the first back press
+[SHOT] wf-autotest-16-16-settings-guard.png
+[INFO] clicked '« 返回' at (220,189)
+[PASS] second back press discards the settings draft
+[PASS] settings draft flag cleared
+[SHOT] wf-autotest-17-17-back-from-settings.png
+[PASS] studio available for the block category
+[INFO] clicked '§6▤ 方块' at (96,127)
+[PASS] block category opens
+[PASS] block panel constructed
+[SHOT] wf-autotest-18-18-blocks-category.png
+[PASS] block category defaults to decoration
+[PASS] block appearance defaults to stone
+[PASS] block appearance is a catalog entry
+[INFO] clicked '＋ 新建方块' at (237,191)
+[PASS] create mode entered
+[SHOT] wf-autotest-19-19-block-create.png
+[INFO] clicked '类型: 装饰' at (237,143)
+[PASS] category cycles to a supported value
+[INFO] clicked '外观: stone' at (349,143)
+[PASS] appearance cycles within the catalog
+[SHOT] wf-autotest-20-20-block-editor.png
+[PASS] ESC leaves the block category
+[SHOT] wf-autotest-21-21-blocks-back.png
+[INFO] opening existing world 'New World' for the render check
+[PASS] player available for the render check
+[SHOT] wf-autotest-22-23-world-blocks-view.png
+[PASS] client block mirror is populated
+[PASS] renderer resolves a catalog appearance
+[PASS] different virtual ids resolve different appearances
+[SHOT] wf-autotest-23-24-world-blocks-close.png
+[SHOT] wf-autotest-24-25-hot-edit.png
+[PASS] hot-edit updated client mirror
+[PASS] hot-edit changed appearance
+[SHOT] wf-autotest-25-26-hot-edit-verify.png
+[SHOT] wf-autotest-26-27-delete.png
+[PASS] delete removed from client mirror
+[SHOT] wf-autotest-27-28-delete-fallback.png
+[SHOT] wf-autotest-28-29-survival-break.png
+[PASS] survival break produced exactly 1 drop
+[PASS] survival drop carries correct VirtualBlockId
+[PASS] re-placed BE restores virtual ID
+[PASS] creative break produces no drop
+[SHOT] wf-autotest-29-30-survival-verify.png
+[RESULT] ALL CHECKS PASSED

@@ -502,6 +502,119 @@ public final class StudioAutoTest {
 					shot(client, "28-delete-fallback");
 				}
 				case 28 -> {
+					if (client.world == null || placedBlocks == 0) {
+						report.add("[SKIP] survival break: no loaded world");
+						wait(5);
+						break;
+					}
+					// survival mode break test: switch to survival, place a block,
+					// break it via the real interaction path, verify drop + identity
+					var server = client.getServer();
+					if (server != null) {
+						server.execute(() -> {
+							var sw = server.getOverworld();
+							var sp = server.getPlayerManager().getPlayer(client.player.getUuid());
+							if (sp == null) return;
+							// switch to survival
+							sp.changeGameMode(net.minecraft.world.GameMode.SURVIVAL);
+							// create a fresh block for the survival test
+							dev.worldforge.tool.WorldForgeBlockTools.createBlock(server,
+									dev.worldforge.block.BlockDefinition.create(
+											"worldforge:survival_test", "生存测试方块", "",
+											"minecraft:emerald_block",
+											dev.worldforge.block.BlockDefinition.Category.DECORATION,
+											2.0, java.util.List.of(), 200, null, 0));
+							dev.worldforge.network.WorldForgePayloads.syncToAll(server);
+							// place it far enough that the player doesn't auto-pickup
+							var sPos = new net.minecraft.util.math.BlockPos(placedX + 4, placedY, placedZ + 10);
+							survivalPos = sPos;
+							// move player away so drops aren't auto-collected
+							sp.setPosition(placedX + 0.5, placedY + 1.0, placedZ + 0.5);
+							sw.setBlockState(sPos,
+									dev.worldforge.registry.WorldForgeBlocks.DYNAMIC_BLOCK.getDefaultState(), 3);
+							if (sw.getBlockEntity(sPos) instanceof dev.worldforge.block.DynamicBlockEntity be) {
+								be.setVirtualId("worldforge:survival_test");
+								sw.updateListeners(sPos, sw.getBlockState(sPos),
+										sw.getBlockState(sPos), 3);
+							}
+							// break it via the real player interaction path
+							sp.interactionManager.tryBreakBlock(sPos);
+							// immediately check drops (same server tick, no auto-pickup yet)
+							var items = sw.getEntitiesByType(
+									net.minecraft.entity.EntityType.ITEM,
+									new net.minecraft.util.math.Box(sPos).expand(3),
+									e -> true);
+							survivalDrops = items.size();
+							boolean foundId = false;
+							for (var item : items) {
+								var comp = item.getStack().get(
+										dev.worldforge.component.WorldForgeComponents.VIRTUAL_BLOCK_ID);
+								if (comp instanceof dev.worldforge.component.VirtualBlockId vid
+										&& "worldforge:survival_test".equals(vid.id())) {
+									foundId = true;
+									break;
+								}
+							}
+							survivalDropHasId = foundId;
+						});
+					}
+					wait(20);
+					shot(client, "29-survival-break");
+				}
+				case 29 -> {
+					if (client.world == null || placedBlocks == 0) {
+						report.add("[SKIP] survival verify: no loaded world");
+						wait(5);
+						break;
+					}
+					// verify results from step 28
+					check("survival break produced exactly 1 drop", survivalDrops == 1);
+					check("survival drop carries correct VirtualBlockId", survivalDropHasId);
+					var server = client.getServer();
+					if (server != null) {
+						server.execute(() -> {
+							var sw = server.getOverworld();
+							var sp = server.getPlayerManager().getPlayer(client.player.getUuid());
+							if (sp == null) return;
+							// switch back to creative
+							sp.changeGameMode(net.minecraft.world.GameMode.CREATIVE);
+							// re-place and verify identity recovery
+							if (survivalPos != null) {
+								sw.setBlockState(survivalPos,
+										dev.worldforge.registry.WorldForgeBlocks.DYNAMIC_BLOCK.getDefaultState(), 3);
+								if (sw.getBlockEntity(survivalPos) instanceof dev.worldforge.block.DynamicBlockEntity be) {
+									be.setVirtualId("worldforge:survival_test");
+									sw.updateListeners(survivalPos, sw.getBlockState(survivalPos),
+											sw.getBlockState(survivalPos), 3);
+									check("re-placed BE restores virtual ID",
+											"worldforge:survival_test".equals(be.virtualId()));
+								}
+							}
+							// creative break: no drop
+							var cPos = new net.minecraft.util.math.BlockPos(placedX + 5, placedY, placedZ + 10);
+							sw.setBlockState(cPos,
+									dev.worldforge.registry.WorldForgeBlocks.DYNAMIC_BLOCK.getDefaultState(), 3);
+							if (sw.getBlockEntity(cPos) instanceof dev.worldforge.block.DynamicBlockEntity be) {
+								be.setVirtualId("worldforge:survival_test");
+								sw.updateListeners(cPos, sw.getBlockState(cPos),
+										sw.getBlockState(cPos), 3);
+							}
+							int beforeC = sw.getEntitiesByType(
+									net.minecraft.entity.EntityType.ITEM,
+									new net.minecraft.util.math.Box(cPos).expand(3),
+									e -> true).size();
+							sp.interactionManager.tryBreakBlock(cPos);
+							int afterC = sw.getEntitiesByType(
+									net.minecraft.entity.EntityType.ITEM,
+									new net.minecraft.util.math.Box(cPos).expand(3),
+									e -> true).size();
+							check("creative break produces no drop", afterC == beforeC);
+						});
+					}
+					wait(15);
+					shot(client, "30-survival-verify");
+				}
+				case 30 -> {
 					finish(client);
 				}
 				default -> {
@@ -613,6 +726,9 @@ public final class StudioAutoTest {
 
 	private int placedBlocks = 0;
 	private int placedX, placedY, placedZ;
+	private net.minecraft.util.math.BlockPos survivalPos;
+	private int survivalDrops = -1;
+	private boolean survivalDropHasId = false;
 
 	/**
 	 * Create two virtual blocks with different appearances and place them in the
