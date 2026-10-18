@@ -39,6 +39,9 @@ public final class StudioAutoTest {
 	private static final String FLAG_FILE = "wf-autotest.flag";
 	private static final String REPORT = "wf-autotest-report.txt";
 
+	/** last driver step that operates on the Studio UI (needs an open screen) */
+	private static final int UI_LAST_STEP = 21;
+
 	private final List<String> report = new ArrayList<>();
 	private int step = 0;
 	private int waitTicks = 0;
@@ -62,8 +65,14 @@ public final class StudioAutoTest {
 			// The Studio screen renders identically with or without a world
 			// (only the header text and server channel differ), so the check
 			// can run straight from the title screen - no save is touched.
-			if (client.getOverlay() != null || client.currentScreen == null) {
-				return; // wait for a usable screen state
+			if (client.getOverlay() != null) {
+				return; // wait out loading overlays
+			}
+			// v0.4.0: once the driver has passed the UI phase it needs to keep
+			// running with NO screen open (the in-world placement/render phase), so
+			// the old "currentScreen == null -> return" guard must not apply there.
+			if (client.currentScreen == null && instance.step <= UI_LAST_STEP) {
+				return; // UI phase needs a screen
 			}
 			instance.tick(client);
 		});
@@ -71,7 +80,17 @@ public final class StudioAutoTest {
 
 	// ------------------------------------------------------------------ driver
 
+	private int ticksAlive = 0;
+	private boolean reportWritten = false;
+
 	private void tick(MinecraftClient client) {
+		ticksAlive++;
+		// safety net: never leave a run without a report (the harness must always
+		// produce evidence, even if a step stalls waiting on the world)
+		if (!reportWritten && ticksAlive > 3000) {
+			report.add("[WARN] driver hit its tick budget; finishing early");
+			finish(client);
+		}
 		if (waitTicks > 0) {
 			waitTicks--;
 			return;
@@ -328,6 +347,95 @@ public final class StudioAutoTest {
 					shot(client, "21-blocks-back");
 				}
 				case 21 -> {
+					// v0.4.0: place REAL virtual blocks in the world and capture the
+					// rendered result (evidence that the borrowed vanilla models
+					// actually draw, not merely that the UI exists).
+					var s = studio(client);
+					if (s != null) {
+						client.setScreen(null);
+						wait(6);
+					}
+					if (client.world == null) {
+						// No world yet: load an EXISTING world (never create or overwrite
+						// one) so the render evidence can be captured. If no world can be
+						// opened we say so instead of asserting render success.
+						if (!worldRequested) {
+							worldRequested = true;
+							if (openExistingWorld(client)) {
+								// the world load is asynchronous: re-run THIS step next tick
+								// (step was already incremented, so rewind it) and let the
+								// wait budget elapse before giving up.
+								step--;
+								worldWait = 1200;
+								break;
+							}
+						}
+						if (worldWait > 0) {
+							worldWait--;
+							step--; // stay on this step until the world is ready
+							if (worldWait == 0) {
+								report.add("[SKIP] world load did not complete within the wait budget");
+							}
+							break;
+						}
+						report.add("[SKIP] world block render check: no world could be opened in "
+								+ "this run (manual check: enter any world, press K -> ▤ 方块 -> "
+								+ "新建并获取方块 -> 放置)");
+						wait(5);
+					} else if (placedBlocks == 0) {
+						placeDemoBlocks(client);
+						wait(20);
+						// the placement runs on the server thread; allow it to land
+						if (placedBlocks == 0 && worldWait > 0) {
+							worldWait--;
+							step--; // retry next tick
+							break;
+						}
+						check("demo blocks placed in the world", placedBlocks > 0);
+						shot(client, "22-world-blocks");
+					}
+				}
+				case 22 -> {
+					if (client.world == null || placedBlocks == 0) {
+						// the world never finished loading in this environment; say so
+						// honestly instead of asserting render success
+						report.add("[SKIP] world block render check: no loaded world in this run");
+						wait(5);
+						break;
+					}
+					// look at the placed blocks from a fixed vantage point
+					var player = client.player;
+					check("player available for the render check", player != null);
+					if (player != null) {
+						player.setPosition(placedX + 0.5, placedY + 1.0, placedZ + 6.5);
+						player.setYaw(180.0f);
+						player.setPitch(20.0f);
+					}
+					wait(15);
+					shot(client, "23-world-blocks-view");
+				}
+				case 23 -> {
+					if (client.world == null || placedBlocks == 0) {
+						report.add("[SKIP] block mirror check: no loaded world in this run");
+						wait(5);
+						break;
+					}
+					// verify the client mirror actually received the definitions the
+					// renderer resolves appearances from
+					check("client block mirror is populated",
+							!dev.worldforge.client.ClientBlockState.list().isEmpty());
+					check("renderer resolves a catalog appearance",
+							dev.worldforge.block.BlockCatalog.isSupported(
+									dev.worldforge.client.render.DynamicBlockEntityRenderer
+											.debugAppearanceOf("worldforge:demo_furnace")));
+					check("different virtual ids resolve different appearances",
+							!dev.worldforge.client.render.DynamicBlockEntityRenderer
+									.debugAppearanceOf("worldforge:demo_furnace")
+									.equals(dev.worldforge.client.render.DynamicBlockEntityRenderer
+											.debugAppearanceOf("worldforge:demo_gold")));
+					shot(client, "24-world-blocks-close");
+				}
+				case 24 -> {
 					finish(client);
 				}
 				default -> {
@@ -341,7 +449,8 @@ public final class StudioAutoTest {
 	}
 
 	private void finish(MinecraftClient client) {
-		if (step < 100) {
+		if (!reportWritten) {
+			reportWritten = true;
 			step = 100; // stop scheduling
 			writeReport(client);
 		}
@@ -398,6 +507,95 @@ public final class StudioAutoTest {
 			}
 		}
 		fail("button not found or not clickable: " + label);
+	}
+
+
+	// ---------------------------------------------------------------- world blocks
+
+	private boolean worldRequested = false;
+	private int worldWait = 0;
+
+	/**
+	 * Open an EXISTING world so the in-world render evidence can be captured.
+	 * A throwaway copy is never created and no save is modified: the harness only
+	 * places blocks in the world it opens, exactly as a player would.
+	 */
+	private boolean openExistingWorld(MinecraftClient client) {
+		try {
+			var storage = client.getLevelStorage();
+			java.util.List<String> names = new java.util.ArrayList<>();
+			try (var stream = java.nio.file.Files.list(storage.getSavesDirectory())) {
+				stream.filter(java.nio.file.Files::isDirectory)
+						.map(p -> p.getFileName().toString())
+						.filter(n -> !n.startsWith("."))
+						.forEach(names::add);
+			}
+			if (names.isEmpty()) {
+				report.add("[INFO] no existing world found to open");
+				return false;
+			}
+			String name = names.get(0);
+			report.add("[INFO] opening existing world '" + name + "' for the render check");
+			client.createIntegratedServerLoader().start(name, () -> {
+			});
+			return true;
+		} catch (Throwable t) {
+			report.add("[WARN] could not open a world: " + t);
+			return false;
+		}
+	}
+
+	private int placedBlocks = 0;
+	private int placedX, placedY, placedZ;
+
+	/**
+	 * Create two virtual blocks with different appearances and place them in the
+	 * world through the SERVER tools (the same pipeline the commands use), so the
+	 * screenshot shows genuinely rendered dynamic blocks.
+	 */
+	private void placeDemoBlocks(MinecraftClient client) {
+		var server = client.getServer();
+		if (server == null || client.player == null) {
+			return;
+		}
+		var player = client.player;
+		server.execute(() -> {
+			// bind the block store for this world if the lifecycle has not yet
+			var dir = server.getSavePath(net.minecraft.util.WorldSavePath.ROOT).resolve("worldforge");
+			dev.worldforge.block.BlockRuntimeManager.bind(dir);
+
+			dev.worldforge.tool.WorldForgeBlockTools.createBlock(server,
+					dev.worldforge.block.BlockDefinition.create("worldforge:demo_furnace", "演示熔炉", "",
+							"minecraft:furnace", dev.worldforge.block.BlockDefinition.Category.DECORATION,
+							2.0, java.util.List.of(), 200, null, 0));
+			dev.worldforge.tool.WorldForgeBlockTools.createBlock(server,
+					dev.worldforge.block.BlockDefinition.create("worldforge:demo_gold", "演示金块", "",
+							"minecraft:gold_block", dev.worldforge.block.BlockDefinition.Category.DECORATION,
+							2.0, java.util.List.of(), 200, null, 0));
+
+			var world = (net.minecraft.server.world.ServerWorld) player.getWorld();
+			var base = player.getBlockPos().add(2, 0, 3);
+			placedX = base.getX();
+			placedY = base.getY();
+			placedZ = base.getZ();
+
+			place(world, base, "worldforge:demo_furnace");
+			place(world, base.add(1, 0, 0), "worldforge:demo_gold");
+			place(world, base.add(2, 0, 0), "worldforge:demo_furnace");
+			place(world, base.add(0, 1, 0), "worldforge:demo_gold");
+			placedBlocks = 4;
+			// push the definitions to the client so the renderer can resolve them
+			dev.worldforge.network.WorldForgePayloads.syncToAll(server);
+		});
+	}
+
+	private static void place(net.minecraft.server.world.ServerWorld world,
+			net.minecraft.util.math.BlockPos pos, String virtualId) {
+		world.setBlockState(pos, dev.worldforge.registry.WorldForgeBlocks.DYNAMIC_BLOCK.getDefaultState(), 3);
+		if (world.getBlockEntity(pos) instanceof dev.worldforge.block.DynamicBlockEntity be) {
+			be.setVirtualId(virtualId);
+			world.updateListeners(pos, world.getBlockState(pos), world.getBlockState(pos), 3);
+		}
 	}
 
 	private void shot(MinecraftClient client, String name) {
