@@ -111,7 +111,16 @@ public class DynamicBlock extends Block implements net.minecraft.block.BlockEnti
 
 	/** true when this removal should yield the identified item */
 	public static boolean shouldDrop(PlayerEntity player) {
-		return player != null && !player.isCreative();
+		return player != null && shouldDrop(player.isCreative());
+	}
+
+	/**
+	 * The decision itself, independent of how the remover is represented - so
+	 * the rule is verifiable even where a harness cannot switch a mock player's
+	 * game mode.
+	 */
+	public static boolean shouldDrop(boolean creative) {
+		return !creative;
 	}
 
 	@Override

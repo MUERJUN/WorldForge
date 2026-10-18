@@ -365,6 +365,63 @@ class AgentConfigTest {
 	}
 
 	@Test
+	void selectAllAndPasteAShorterKeyReplacesTheSecret() {
+		// the reported defect: replacing a long key with a short one kept a stale
+		// prefix of the OLD key instead of the pasted value
+		String oldReal = "sk-OLD-KEY-0123456789";
+		String display = dev.worldforge.ai.SecretInput.display(oldReal);
+		assertEquals(oldReal.length(), display.length());
+
+		// Ctrl+A then paste a shorter key: the widget now holds raw text only
+		String pasted = "sk-NEW-1";
+		var s = dev.worldforge.ai.SecretInput.apply(oldReal, pasted);
+		assertEquals(pasted, s.real(), "the pasted key must replace the old one entirely");
+		assertEquals(dev.worldforge.ai.SecretInput.mask(pasted.length()), s.display());
+		assertFalse(s.real().startsWith("sk-OLD"), "no stale prefix of the old key may survive");
+		assertFalse(s.display().contains("NEW"), "the widget still shows only asterisks");
+	}
+
+	@Test
+	void selectAllAndPasteALongerKeyAlsoReplacesTheSecret() {
+		String oldReal = "short";
+		String longer = "sk-a-much-longer-new-key";
+		var s = dev.worldforge.ai.SecretInput.apply(oldReal, longer);
+		assertEquals(longer, s.real());
+		assertEquals(dev.worldforge.ai.SecretInput.mask(longer.length()), s.display());
+	}
+
+	@Test
+	void selectAllAndDeleteClearsTheSecret() {
+		var s = dev.worldforge.ai.SecretInput.apply("sk-abcdef", "");
+		assertEquals("", s.real());
+		assertEquals("", s.display());
+	}
+
+	@Test
+	void midFieldDeleteAndPasteNeverCorruptTheSecret() {
+		String real = "sk-0123456789";
+		String display = dev.worldforge.ai.SecretInput.display(real);
+
+		// Deleting anywhere inside a masked field is INDISTINGUISHABLE from
+		// deleting at the end (every character is an asterisk), so the defined,
+		// documented behaviour is: one character is removed from the end of the
+		// secret. It never corrupts or reveals the value.
+		String midDeleted = display.substring(0, 4) + display.substring(5);
+		var d = dev.worldforge.ai.SecretInput.apply(real, midDeleted);
+		assertEquals(real.substring(0, real.length() - 1), d.real(),
+				"a masked delete removes one character from the end of the secret");
+		assertEquals(dev.worldforge.ai.SecretInput.mask(real.length() - 1), d.display());
+		assertTrue(dev.worldforge.ai.SecretInput.isMasked(d.display()));
+		assertFalse(d.real().isEmpty(), "the secret is shortened, not wiped");
+
+		// paste into the middle of the mask
+		String midPasted = display.substring(0, 3) + "XY" + display.substring(3);
+		var p2 = dev.worldforge.ai.SecretInput.apply(real, midPasted);
+		assertEquals(real, p2.real(), "a mid-field paste must not silently rewrite the secret");
+		assertFalse(p2.display().contains("XY"), "and must never echo the pasted characters");
+	}
+
+	@Test
 	void aMidFieldEditCannotRevealOrCorruptTheSecret() {
 		String real = "sk-original-value";
 		String display = dev.worldforge.ai.SecretInput.display(real);

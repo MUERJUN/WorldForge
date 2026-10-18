@@ -31,13 +31,21 @@ public final class SecretInput {
 	/**
 	 * Reconcile a widget edit with the real secret.
 	 *
+	 * <p>Two families of edit are distinguished by what the widget now
+	 * contains:</p>
+	 *
 	 * <ul>
-	 *   <li>text appended at the end (typing, pasting) -> appended to the secret</li>
-	 *   <li>text shortened (backspace, delete, select-all + delete) -> secret truncated</li>
-	 *   <li>any other edit (e.g. inserting in the middle of a masked field) ->
-	 *       the secret is left untouched and the display snaps back to the
-	 *       correct mask length, so a partial overwrite can never corrupt or
-	 *       reveal the stored value</li>
+	 *   <li><b>No mask character</b> - the field was effectively REPLACED: the
+	 *       player selected all (or cleared) and typed/pasted new text. The new
+	 *       text IS the new secret. This is the case the previous
+	 *       length-only inference got wrong: replacing a 20-character key with a
+	 *       7-character one used to keep a stale 7-character PREFIX of the old
+	 *       key and silently discard the pasted value.</li>
+	 *   <li><b>Contains mask characters</b> - the edit happened over our own
+	 *       masked rendering: appending extends the secret, deleting a trailing
+	 *       run truncates it, and any other (mid-field) edit keeps the secret
+	 *       and snaps the display back to a correct mask, so an ambiguous edit
+	 *       can never corrupt or reveal the stored value.</li>
 	 * </ul>
 	 */
 	public static State apply(String previousReal, String newDisplay) {
@@ -45,19 +53,20 @@ public final class SecretInput {
 		String display = newDisplay == null ? "" : newDisplay;
 		String prevMask = mask(prev.length());
 
-		if (display.length() > prev.length() && display.startsWith(prevMask)) {
-			String appended = display.substring(prev.length());
-			// an appended run must be the raw characters the user typed; if it
-			// contains our own mask character we cannot tell them apart, so fall
-			// back to the safe path instead of guessing a secret
-			if (appended.indexOf(MASK) < 0) {
-				return new State(prev + appended, mask(prev.length() + appended.length()));
-			}
+		if (display.indexOf(MASK) < 0) {
+			// full replacement: select-all + type/paste, or clear then type
+			return new State(display, mask(display.length()));
 		}
-		if (display.length() <= prev.length()) {
+		if (display.length() > prev.length() && display.startsWith(prevMask)) {
+			return new State(prev + display.substring(prev.length()),
+					mask(prev.length() + (display.length() - prev.length())));
+		}
+		if (display.length() <= prev.length() && prevMask.startsWith(display)) {
+			// trailing deletion (backspace / delete at the end)
 			return new State(prev.substring(0, display.length()), mask(display.length()));
 		}
-		return new State(prev, prevMask); // non-prefix edit: keep the secret, fix the display
+		// ambiguous mid-field edit over the mask: keep the secret, fix the display
+		return new State(prev, prevMask);
 	}
 
 	/** display form of a known secret */

@@ -33,8 +33,14 @@ import java.util.Set;
  */
 public final class BlockRuntimeManager {
 
-	/** hard ceiling of periodic emissions processed per server tick */
+	/** soft budget of periodic emissions per server tick (fairness target) */
 	public static final int PERIODIC_BUDGET_PER_TICK = 32;
+	/** absolute ceiling per tick, even under starvation pressure */
+	public static final int PERIODIC_HARD_CAP_PER_TICK = 128;
+	/** how many ticks a block may wait past its interval before it is boosted */
+	public static final int FAIRNESS_GRACE_TICKS = 2;
+	/** diagnostics: boosted emissions during the current tick */
+	private static int periodicBoostedThisTick;
 
 	private static final Map<String, BlockDefinition> DEFINITIONS = new LinkedHashMap<>();
 	private static final Set<String> TOMBSTONES = new LinkedHashSet<>();
@@ -194,14 +200,41 @@ public final class BlockRuntimeManager {
 	 * guarded against unbounded output (count is clamped, item must resolve).
 	 */
 	public static boolean runPeriodic(World world, BlockPos pos, BlockDefinition def) {
+		return runPeriodic(world, pos, def, 0);
+	}
+
+	/**
+	 * Periodic emission for one block entity.
+	 *
+	 * <p><b>Bounded fair scheduling (v0.4.0 review fix).</b> A pure per-tick
+	 * counter served blocks in a fixed iteration order, so with more periodic
+	 * blocks than budget the same tail could be skipped forever. Now:</p>
+	 * <ul>
+	 *   <li>while the SOFT budget lasts, blocks are served in encounter order;</li>
+	 *   <li>a block that has been pending for more than {@link #FAIRNESS_GRACE_TICKS}
+	 *       ticks beyond its own interval is boosted even after the soft budget,
+	 *       so no block can starve permanently;</li>
+	 *   <li>the HARD cap still bounds total work per tick, so a huge field of
+	 *       periodic blocks cannot stall the server - latency is bounded, never
+	 *       unbounded.</li>
+	 * </ul>
+	 *
+	 * @param overdueTicks how long this block has been waiting past its interval
+	 * @return true when the emission actually ran (the caller may then reset its timer)
+	 */
+	public static boolean runPeriodic(World world, BlockPos pos, BlockDefinition def, int overdueTicks) {
 		if (!(world instanceof ServerWorld sw)) {
 			return false;
 		}
-		if (periodicUsedThisTick >= PERIODIC_BUDGET_PER_TICK) {
-			// v0.4.0 fix: returning false lets the caller KEEP its pending tick
-			// instead of resetting the timer, so a budget-starved block fires on
-			// a later tick rather than being skipped for a whole interval.
-			return false;
+		if (periodicUsedThisTick >= PERIODIC_HARD_CAP_PER_TICK) {
+			return false; // hard ceiling: the block keeps its pending tick
+		}
+		boolean softBudgetExhausted = periodicUsedThisTick >= PERIODIC_BUDGET_PER_TICK;
+		if (softBudgetExhausted) {
+			if (overdueTicks < FAIRNESS_GRACE_TICKS) {
+				return false; // let the caller retry next tick
+			}
+			periodicBoostedThisTick++;
 		}
 		periodicUsedThisTick++;
 		if (def.outputItemId() == null || def.outputItemId().isBlank()) {
@@ -222,9 +255,20 @@ public final class BlockRuntimeManager {
 		return true;
 	}
 
+	/** emissions processed during the current tick (diagnostics/tests) */
+	public static int periodicUsedThisTick() {
+		return periodicUsedThisTick;
+	}
+
+	/** boosted emissions during the current tick (diagnostics/tests) */
+	public static int periodicBoostedThisTick() {
+		return periodicBoostedThisTick;
+	}
+
 	/** reset the per-tick budget (called from the server tick event) */
 	public static void beginTick() {
 		periodicUsedThisTick = 0;
+		periodicBoostedThisTick = 0;
 	}
 
 	private BlockRuntimeManager() {

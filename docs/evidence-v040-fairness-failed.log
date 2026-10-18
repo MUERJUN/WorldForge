@@ -1,0 +1,2 @@
+worldforgeblockregressiontests.testr3_periodicbudgetkeepspendingtick failed at -4341776, -60, 7912731! REGRESSION: a budget-starved periodic block was never served within 47 ticks (counter 47, interval 40)
+1 required tests failed :(

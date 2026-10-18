@@ -89,15 +89,20 @@ public class DynamicBlockEntity extends BlockEntity {
 		if (def == null || !def.periodic()) {
 			return;
 		}
-		tickCounter++;
-		if (tickCounter < Math.max(1, def.tickIntervalTicks())) {
+		int interval = Math.max(1, def.tickIntervalTicks());
+		if (tickCounter < interval) {
+			tickCounter++;
 			return;
 		}
 		// v0.4.0 fix: only consume the pending tick when the emission actually
-		// ran; a budget-starved block keeps its counter and retries next tick.
-		if (BlockRuntimeManager.runPeriodic(world, pos, def)) {
+		// ran; a budget-starved block keeps its counter, reports how overdue it
+		// is (so the scheduler can boost it), and retries next tick.
+		int overdue = tickCounter - interval;
+		if (BlockRuntimeManager.runPeriodic(world, pos, def, overdue)) {
 			tickCounter = 0;
 			markDirty();
+		} else {
+			tickCounter = interval + Math.min(overdue + 1, 1000);
 		}
 	}
 }
