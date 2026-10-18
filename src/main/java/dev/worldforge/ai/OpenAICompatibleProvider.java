@@ -140,6 +140,43 @@ public final class OpenAICompatibleProvider implements ModelProvider {
 		return msg.get("content").getAsString();
 	}
 
+	/**
+	 * v0.4.0 P0: one real, minimal request used by the in-game "测试连接"
+	 * button. Runs asynchronously and classifies the outcome (auth, model,
+	 * rate limit, network, timeout) with a redacted message.
+	 */
+	public static java.util.concurrent.CompletableFuture<AgentConnectionTest.Result> probe(
+			AgentConfig cfg, String key) {
+		long t0 = System.currentTimeMillis();
+		return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+			try {
+				HttpClient http = HttpClient.newBuilder()
+						.connectTimeout(Duration.ofSeconds(Math.min(10, cfg.timeoutSeconds())))
+						.build();
+				JsonObject o = new JsonObject();
+				o.addProperty("model", cfg.model());
+				o.addProperty("max_tokens", 1);
+				JsonArray msgs = new JsonArray();
+				msgs.add(msg("user", "ping"));
+				o.add("messages", msgs);
+				String base = cfg.baseUrl().endsWith("/")
+						? cfg.baseUrl().substring(0, cfg.baseUrl().length() - 1) : cfg.baseUrl();
+				HttpRequest req = HttpRequest.newBuilder(URI.create(base + "/chat/completions"))
+						.timeout(Duration.ofSeconds(cfg.timeoutSeconds()))
+						.header("Content-Type", "application/json")
+						.header("Authorization", "Bearer " + key)
+						.POST(HttpRequest.BodyPublishers.ofString(o.toString()))
+						.build();
+				HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+				return AgentConnectionTest.classify(res.statusCode(), res.body(), cfg.model(),
+						System.currentTimeMillis() - t0, key);
+			} catch (Exception e) {
+				String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+				return AgentConnectionTest.networkFailure(msg, cfg.model(), key);
+			}
+		});
+	}
+
 	@Override
 	public String describe() {
 		return cfg.model() + " @ " + cfg.baseUrl();

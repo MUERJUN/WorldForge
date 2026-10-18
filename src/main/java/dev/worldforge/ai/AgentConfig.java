@@ -31,6 +31,58 @@ public record AgentConfig(
 		int historyLimit,
 		int proposalTtlSeconds) {
 
+	/** selectable service providers; CUSTOM accepts any OpenAI-compatible URL */
+	public enum Provider {
+		DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"),
+		OPENAI("OpenAI", "https://api.openai.com/v1", "gpt-4o-mini"),
+		CUSTOM("自定义兼容接口", "", "");
+
+		private final String display;
+		private final String baseUrl;
+		private final String defaultModel;
+
+		Provider(String display, String baseUrl, String defaultModel) {
+			this.display = display;
+			this.baseUrl = baseUrl;
+			this.defaultModel = defaultModel;
+		}
+
+		public String display() {
+			return display;
+		}
+
+		public String baseUrl() {
+			return baseUrl;
+		}
+
+		public String defaultModel() {
+			return defaultModel;
+		}
+	}
+
+	/** which preset (if any) this configuration matches */
+	public Provider provider() {
+		for (Provider p : Provider.values()) {
+			if (p != Provider.CUSTOM && p.baseUrl().equalsIgnoreCase(trimSlash(baseUrl))) {
+				return p;
+			}
+		}
+		return Provider.CUSTOM;
+	}
+
+	private static String trimSlash(String u) {
+		if (u == null) {
+			return "";
+		}
+		return u.endsWith("/") ? u.substring(0, u.length() - 1) : u;
+	}
+
+	/** derived redacted summary safe for GUI display and logs */
+	public String redactedSummary() {
+		return "provider=" + provider().display() + ", model=" + model
+				+ ", url=" + baseUrl + ", key=" + maskKey(apiKey) + ", enabled=" + enabled;
+	}
+
 	public static final AgentConfig DISABLED = new AgentConfig(false,
 			"https://api.openai.com/v1", "gpt-4o-mini", "", 60, 1200, 1, 10, 12, 300);
 
@@ -52,8 +104,24 @@ public record AgentConfig(
 	}
 
 	public boolean usable() {
-		return enabled && apiKey != null && !apiKey.isBlank()
+		return enabled && !keyIsPlaceholder(apiKey)
 				&& baseUrl != null && !baseUrl.isBlank() && model != null && !model.isBlank();
+	}
+
+	/**
+	 * The generated template ships a visible placeholder instead of a key.
+	 * Treating it as configured made the client attempt real calls with a
+	 * garbage key (and report the agent as "enabled"), so placeholder values
+	 * are explicitly rejected here.
+	 */
+	public static boolean keyIsPlaceholder(String key) {
+		if (key == null || key.isBlank()) {
+			return true;
+		}
+		String k = key.trim().toLowerCase(java.util.Locale.ROOT);
+		return k.contains("paste") || k.contains("your-key") || k.contains("your_key")
+				|| k.equals("changeme") || k.equals("none") || k.equals("null")
+				|| k.startsWith("<");
 	}
 
 	public static AgentConfig load(Path configFile) {

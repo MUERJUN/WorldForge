@@ -1,0 +1,238 @@
+package dev.worldforge;
+
+import com.sun.net.httpserver.HttpServer;
+import dev.worldforge.ai.AgentConfig;
+import dev.worldforge.ai.AgentConfigStore;
+import dev.worldforge.ai.AgentConnectionTest;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * v0.4.0 P0: in-game AI configuration - storage, validation, hot apply and a
+ * REAL connectivity probe.
+ *
+ * <p>Verification has no real API key available, so the HTTP side is exercised
+ * against a local {@link HttpServer} that answers with real status codes. That
+ * is a genuine network test of the classification logic (not a mock of it);
+ * calling a real vendor endpoint is listed as pending verification.</p>
+ */
+class AgentConfigTest {
+
+	private static final String SECRET = "sk-test-SUPERSECRET-1234567890";
+
+	private static AgentConfig cfg(String baseUrl, String model, String key, boolean enabled) {
+		return new AgentConfig(enabled, baseUrl, model, key, 10, 128, 0, 30, 12, 300);
+	}
+
+	// ---------------------------------------------------------------- storage
+
+	@Test
+	void saveAndLoadRoundTripKeepsConfiguration(@TempDir Path dir) {
+		var store = new AgentConfigStore(dir.resolve("agent.json"));
+		assertTrue(store.save(cfg("https://api.deepseek.com/v1", "deepseek-chat", SECRET, true)));
+		var loaded = store.load();
+		assertEquals("https://api.deepseek.com/v1", loaded.baseUrl());
+		assertEquals("deepseek-chat", loaded.model());
+		assertEquals(SECRET, loaded.apiKey());
+		assertTrue(loaded.enabled());
+		assertTrue(loaded.usable());
+	}
+
+	@Test
+	void redactedSummaryNeverContainsTheKey(@TempDir Path dir) {
+		var store = new AgentConfigStore(dir.resolve("agent.json"));
+		var c = cfg("https://api.deepseek.com/v1", "deepseek-chat", SECRET, true);
+		store.save(c);
+		String summary = store.load().redactedSummary();
+		assertFalse(summary.contains(SECRET), "redacted summary must never expose the key");
+		assertFalse(summary.contains("1234567890"), "not even the tail of the key");
+		assertTrue(summary.contains("deepseek"), summary);
+		// and the record's own toString is masked too (it is used in log lines)
+		assertFalse(c.toString().contains(SECRET));
+		assertFalse(c.toString().contains("1234567890"));
+	}
+
+	@Test
+	void clearKeyKeepsTheRestOfTheConfiguration(@TempDir Path dir) throws Exception {
+		var file = dir.resolve("agent.json");
+		var store = new AgentConfigStore(file);
+		store.save(cfg("https://api.openai.com/v1", "gpt-4o-mini", SECRET, true));
+		assertTrue(store.clearKey());
+		var loaded = store.load();
+		assertEquals("", loaded.apiKey());
+		assertFalse(loaded.usable(), "without a key the agent must report unavailable");
+		assertEquals("gpt-4o-mini", loaded.model(), "model survives a key removal");
+		// the key must also be gone from the raw file on disk
+		assertFalse(Files.readString(file, StandardCharsets.UTF_8).contains(SECRET));
+	}
+
+	@Test
+	void missingConfigurationIsDisabledNotBroken(@TempDir Path dir) {
+		var store = new AgentConfigStore(dir.resolve("agent.json"));
+		assertFalse(store.exists());
+		var c = store.load();
+		assertFalse(c.usable());
+		assertFalse(c.enabled() || c.usable());
+	}
+
+	@Test
+	void templateCreationIsUsableByTheGui(@TempDir Path dir) {
+		var store = new AgentConfigStore(dir.resolve("agent.json"));
+		var c = store.loadOrCreateTemplate();
+		assertTrue(store.exists());
+		assertNotNull(c.model());
+		assertFalse(c.usable(), "the placeholder template must not count as configured");
+	}
+
+	@Test
+	void hotUpdateTakesEffectWithoutRestart(@TempDir Path dir) {
+		var store = new AgentConfigStore(dir.resolve("agent.json"));
+		store.save(cfg("https://api.deepseek.com/v1", "deepseek-chat", SECRET, true));
+		assertTrue(store.load().usable());
+		// switch model + disable, exactly like the GUI would
+		store.save(cfg("https://api.openai.com/v1", "gpt-4o-mini", SECRET, false));
+		var c = store.load();
+		assertEquals("gpt-4o-mini", c.model());
+		assertFalse(c.usable(), "disabled configuration must be reflected immediately");
+	}
+
+	// ---------------------------------------------------------------- validation
+
+	@Test
+	void baseUrlValidationRejectsMalformedInput() {
+		assertTrue(AgentConnectionTest.validBaseUrl("https://api.deepseek.com/v1"));
+		assertTrue(AgentConnectionTest.validBaseUrl("http://127.0.0.1:8080/v1"));
+		assertFalse(AgentConnectionTest.validBaseUrl(""));
+		assertFalse(AgentConnectionTest.validBaseUrl("api.deepseek.com"));
+		assertFalse(AgentConnectionTest.validBaseUrl("ftp://example.com"));
+		assertFalse(AgentConnectionTest.validBaseUrl("https://bad host/v1"));
+		assertFalse(AgentConnectionTest.validBaseUrl("https://"));
+	}
+
+	@Test
+	void providerPresetsAreDetected() {
+		assertEquals(AgentConfig.Provider.DEEPSEEK,
+				cfg("https://api.deepseek.com/v1", "deepseek-chat", SECRET, true).provider());
+		assertEquals(AgentConfig.Provider.OPENAI,
+				cfg("https://api.openai.com/v1", "gpt-4o-mini", SECRET, true).provider());
+		assertEquals(AgentConfig.Provider.DEEPSEEK,
+				cfg("https://api.deepseek.com/v1/", "deepseek-chat", SECRET, true).provider(),
+				"trailing slash must not defeat preset detection");
+		assertEquals(AgentConfig.Provider.CUSTOM,
+				cfg("https://my-gateway.internal/v1", "some-model", SECRET, true).provider());
+	}
+
+	// ---------------------------------------------------------------- probe
+
+	@Test
+	void probeWithoutKeyOrDisabledIsRefusedLocally() {
+		var disabled = AgentConnectionTest.test(cfg("https://api.deepseek.com/v1", "deepseek-chat", SECRET, false), null)
+				.join();
+		assertEquals(AgentConnectionTest.Verdict.DISABLED, disabled.verdict());
+
+		var noKey = AgentConnectionTest.test(cfg("https://api.deepseek.com/v1", "deepseek-chat", "", true), null).join();
+		assertEquals(AgentConnectionTest.Verdict.NO_KEY, noKey.verdict());
+
+		var badUrl = AgentConnectionTest.test(cfg("api.deepseek.com", "deepseek-chat", SECRET, true), null).join();
+		assertEquals(AgentConnectionTest.Verdict.BAD_URL, badUrl.verdict());
+	}
+
+	@Test
+	void probeAgainstARealHttpServerClassifiesEveryStatus() throws Exception {
+		record Case(int status, String body, AgentConnectionTest.Verdict expected) {
+		}
+		Case[] cases = {
+				new Case(200, "{\"choices\":[{\"message\":{\"content\":\"pong\"}}]}", AgentConnectionTest.Verdict.OK),
+				new Case(401, "{\"error\":{\"message\":\"invalid api key\"}}", AgentConnectionTest.Verdict.AUTH_ERROR),
+				new Case(403, "{\"error\":{\"message\":\"forbidden\"}}", AgentConnectionTest.Verdict.AUTH_ERROR),
+				new Case(404, "{\"error\":{\"message\":\"model not found\"}}", AgentConnectionTest.Verdict.MODEL_NOT_FOUND),
+				new Case(400, "{\"error\":{\"message\":\"unknown model\"}}", AgentConnectionTest.Verdict.MODEL_NOT_FOUND),
+				new Case(429, "{\"error\":{\"message\":\"rate limited\"}}", AgentConnectionTest.Verdict.RATE_LIMITED),
+				new Case(500, "{\"error\":{\"message\":\"boom\"}}", AgentConnectionTest.Verdict.SERVER_ERROR),
+		};
+		for (Case c : cases) {
+			int port = freePort();
+			HttpServer server = startServer(port, c.status(), c.body());
+			try {
+				var result = AgentConnectionTest
+						.test(cfg("http://127.0.0.1:" + port + "/v1", "test-model", SECRET, true), null)
+						.get(15, TimeUnit.SECONDS);
+				assertEquals(c.expected(), result.verdict(),
+						"status " + c.status() + " must classify as " + c.expected() + " but was " + result.verdict());
+				assertEquals(c.status(), result.httpStatus(), "the HTTP status must be reported to the player");
+				assertFalse(result.message().contains(SECRET), "probe message must never contain the key");
+				assertFalse(String.valueOf(result.message()).contains("1234567890"));
+			} finally {
+				server.stop(0);
+			}
+		}
+	}
+
+	@Test
+	void probeOnAnUnreachablePortIsANetworkError() {
+		int port = freePort();
+		var result = AgentConnectionTest.test(cfg("http://127.0.0.1:" + port + "/v1", "m", SECRET, true), null).join();
+		assertTrue(result.verdict() == AgentConnectionTest.Verdict.NETWORK_ERROR
+						|| result.verdict() == AgentConnectionTest.Verdict.TIMEOUT,
+				"unreachable endpoint must be reported as a network problem, got " + result.verdict());
+		assertFalse(result.message().contains(SECRET));
+	}
+
+	@Test
+	void errorBodiesThatEchoTheKeyAreScrubbed() {
+		String echoed = "{\"error\":{\"message\":\"invalid key " + SECRET + "\"},"
+				+ "\"note\":\"Authorization: Bearer " + SECRET + "\"}";
+		var r = AgentConnectionTest.classify(401, echoed, "m", 12, SECRET);
+		assertFalse(r.message().contains(SECRET), "an echoing gateway must not leak the key into the GUI");
+		assertFalse(r.message().contains("1234567890"));
+		// key-shaped strings are scrubbed even when no key is supplied to scrub with
+		var r2 = AgentConnectionTest.classify(500, "oops sk-abcdef123456", "m", 3, null);
+		assertFalse(r2.message().contains("sk-abcdef123456"));
+	}
+
+	@Test
+	void unsupportedAppearanceIsRejectedNotSilentlyFallenBack() {
+		// P1 bug fix: strict support check must not accept unknown appearances
+		assertTrue(dev.worldforge.block.BlockCatalog.isSupported("minecraft:furnace"));
+		assertTrue(dev.worldforge.block.BlockCatalog.isSupported("furnace"));
+		assertFalse(dev.worldforge.block.BlockCatalog.isSupported("minecraft:diamond_block"),
+				"an appearance outside the catalog must NOT be reported as supported");
+		assertFalse(dev.worldforge.block.BlockCatalog.isSupported("totally_made_up"));
+		assertNull(dev.worldforge.block.BlockCatalog.strictAppearance("minecraft:diamond_block"));
+		// ... while rendering/display fallback still yields something usable
+		assertEquals("minecraft:stone", dev.worldforge.block.BlockCatalog.normalize("totally_made_up"));
+		assertEquals("minecraft:furnace", dev.worldforge.block.BlockCatalog.normalize("furnace"));
+	}
+
+	// ---------------------------------------------------------------- helpers
+
+	private static int freePort() {
+		try (java.net.ServerSocket s = new java.net.ServerSocket(0)) {
+			return s.getLocalPort();
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	private static HttpServer startServer(int port, int status, String body) throws IOException {
+		HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
+		server.createContext("/", exchange -> {
+			byte[] out = body.getBytes(StandardCharsets.UTF_8);
+			exchange.getResponseHeaders().add("Content-Type", "application/json");
+			exchange.sendResponseHeaders(status, out.length);
+			exchange.getResponseBody().write(out);
+			exchange.close();
+		});
+		server.start();
+		return server;
+	}
+}

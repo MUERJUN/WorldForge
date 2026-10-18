@@ -54,24 +54,35 @@ public final class BlockCatalog {
 		return List.copyOf(CATALOG.keySet());
 	}
 
-	/** accept "stone", "minecraft:stone" or a full id; empty/unknown -> default */
-	public static String normalize(String appearance) {
+	/**
+	 * Strict resolution: returns the canonical vanilla block id ONLY when the
+	 * requested appearance is genuinely in the catalog, otherwise {@code null}.
+	 *
+	 * <p>v0.4.0 fix: the previous single {@code normalize()} folded "unknown"
+	 * into the stone fallback, so {@code isSupported("minecraft:diamond_block")}
+	 * returned TRUE - a validation hole that would have let an unsupported
+	 * appearance through the proposal validator. Strict resolution and display
+	 * fallback are now separate operations.</p>
+	 */
+	public static String strictAppearance(String appearance) {
 		if (appearance == null || appearance.isBlank()) {
-			return DEFAULT_APPEARANCE;
+			return null;
 		}
 		String a = appearance.trim();
-		String key = a.contains(":") ? a.substring(a.indexOf(':') + 1) : a;
-		// already a full supported vanilla id
-		if (a.contains(":") && CATALOG.containsValue(a)) {
-			return a;
+		if (a.contains(":")) {
+			return CATALOG.containsValue(a) ? a : null;
 		}
-		String mapped = CATALOG.get(key);
-		return mapped != null ? mapped : DEFAULT_APPEARANCE;
+		return CATALOG.get(a); // null when not a catalog key
 	}
 
 	public static boolean isSupported(String appearance) {
-		String n = normalize(appearance);
-		return CATALOG.containsValue(n);
+		return strictAppearance(appearance) != null;
+	}
+
+	/** display/rendering resolution: unsupported or empty values fall back to stone */
+	public static String normalize(String appearance) {
+		String strict = strictAppearance(appearance);
+		return strict != null ? strict : DEFAULT_APPEARANCE;
 	}
 
 	/** resolve to the vanilla block, or the fallback when unknown */
