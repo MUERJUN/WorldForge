@@ -7,7 +7,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 - 游戏版本：Minecraft Java **1.21.1**
 - 加载器：Fabric Loader **0.16.9** + Fabric API **0.116.5+1.21.1**
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**
-- 当前版本：**v0.3.2 已发布**；**v0.4.0 开发中**（动态方块引擎）
+- 当前版本：**v0.4.0 已发布**（动态方块引擎）
 
 ---
 
@@ -15,7 +15,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 
 ```bash
 ./gradlew build           # 编译 + JUnit 88 项
-./gradlew runGameTest     # 真实服务端 GameTest 51 项
+./gradlew runGameTest     # 真实服务端 GameTest 61 项
 ./gradlew runClient       # 进游戏：按 K 打开 Studio
 ```
 
@@ -23,7 +23,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 
 ---
 
-## v0.4.0 — 动态方块引擎（开发中）
+## v0.4.0 — 动态方块引擎（已发布）
 
 ### 核心机制：虚拟方块
 
@@ -198,8 +198,8 @@ src/client/java/dev/worldforge/client/
 | 测试 | 数量 | 方式 |
 |---|---|---|
 | JUnit | 88 项 | `./gradlew test` |
-| GameTest | 51 项 | `./gradlew runGameTest` |
-| 客户端自动化 | 24 步 | `./gradlew runClient`（需 flag） |
+| GameTest | 61 项 | `./gradlew runGameTest` |
+| 客户端自动化 | 28 步 | `./gradlew runClient`（需 flag） |
 
 GameTest 覆盖：物品创建/修改/删除/持久化/同步/行为/失效/跨存档隔离/损坏恢复 + 方块定义/放置/身份/破坏/热修改/失效/调度压力/AI 提案端到端/类型隔离。
 

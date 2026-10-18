@@ -1,6 +1,6 @@
 # 更新日志
 
-## v0.4.0 开发中 — 动态方块引擎
+## v0.4.0 已发布 — 动态方块引擎
 
 **虚拟方块（不注册新方块）**：启动期只注册 1 个通用 `worldforge:dynamic_block` + 1 个 BlockEntity 类型 + 1 个方块物品；玩家的每个"虚拟方块"是它的实例，身份存于 BlockEntity（`worldforge:virtual_block_id` 数据组件 → 放置时写入 BE → NBT 持久化）。
 
