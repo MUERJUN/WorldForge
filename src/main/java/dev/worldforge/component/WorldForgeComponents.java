@@ -35,6 +35,16 @@ public final class WorldForgeComponents {
 							.packetCodec(BehaviorState.PACKET_CODEC)
 							.build());
 
+	/** Stable virtual identity on every dynamic BLOCK stack (v0.4.0). */
+	public static final ComponentType<VirtualBlockId> VIRTUAL_BLOCK_ID =
+			Registry.register(
+					Registries.DATA_COMPONENT_TYPE,
+					WorldForge.id("virtual_block_id"),
+					ComponentType.<VirtualBlockId>builder()
+							.codec(VirtualBlockId.CODEC)
+							.packetCodec(VirtualBlockId.PACKET_CODEC)
+							.build());
+
 	public static void register() {
 		// Class-initialisation registers; nothing to do here. Kept as an
 		// explicit hook so the init order in WorldForge#onInitialize is obvious.

@@ -25,7 +25,8 @@
 			"dev.worldforge.test.WorldForgeGameTests",
 			"dev.worldforge.test.WorldForgeV012Tests",
 			"dev.worldforge.test.WorldForgeStudioBusinessTests",
-			"dev.worldforge.test.WorldForgeAgentTests"
+			"dev.worldforge.test.WorldForgeAgentTests",
+			"dev.worldforge.test.WorldForgeBlockTests"
 		]
 	},
 	"depends": {

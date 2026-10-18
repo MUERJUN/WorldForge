@@ -39,12 +39,36 @@ import java.util.Map;
  */
 public class WorldForgeGameTests {
 
-	// ---- Test A: exactly ONE worldforge native item ----
+	/**
+	 * Test A: the native registry surface stays CONSTANT and minimal.
+	 *
+	 * <p>v0.1 asserted exactly one native item. v0.4.0 intentionally adds the
+	 * generic dynamic BLOCK plus its block item (a block cannot be placed
+	 * without one), so the invariant is restated precisely instead of being
+	 * dropped: exactly one generic dynamic item, exactly one generic dynamic
+	 * block, and exactly one block item for it - i.e. the count never grows
+	 * with the number of user-created definitions.</p>
+	 */
 	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge")
 	public void testA_singleNativeItem(TestContext ctx) {
 		long wfItems = Registries.ITEM.getIds().stream()
 				.filter(id -> id.getNamespace().equals("worldforge")).count();
-		ctx.assertTrue(wfItems == 1, "expected exactly 1 native worldforge item, got " + wfItems);
+		long wfBlocks = Registries.BLOCK.getIds().stream()
+				.filter(id -> id.getNamespace().equals("worldforge")).count();
+		long wfBeTypes = Registries.BLOCK_ENTITY_TYPE.getIds().stream()
+				.filter(id -> id.getNamespace().equals("worldforge")).count();
+		ctx.assertTrue(wfItems == 2,
+				"expected exactly 2 native worldforge items (dynamic_item + dynamic_block), got " + wfItems);
+		ctx.assertTrue(wfBlocks == 1,
+				"expected exactly 1 native worldforge block (the generic dynamic block), got " + wfBlocks);
+		ctx.assertTrue(wfBeTypes == 1,
+				"expected exactly 1 worldforge block entity type, got " + wfBeTypes);
+		ctx.assertTrue(Registries.ITEM.getIds().stream()
+						.anyMatch(id -> id.getNamespace().equals("worldforge") && id.getPath().equals("dynamic_item")),
+				"the generic dynamic item must exist");
+		ctx.assertTrue(Registries.BLOCK.getIds().stream()
+						.anyMatch(id -> id.getNamespace().equals("worldforge") && id.getPath().equals("dynamic_block")),
+				"the generic dynamic block must exist");
 		ctx.assertTrue(Registries.ITEM.get(Identifier.of("worldforge", "dynamic_item")) == WorldForgeItems.DYNAMIC_ITEM,
 				"worldforge:dynamic_item missing from registry");
 		ctx.complete();

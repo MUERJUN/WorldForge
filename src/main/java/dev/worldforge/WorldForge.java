@@ -14,6 +14,7 @@ import dev.worldforge.component.WorldForgeComponents;
 import dev.worldforge.definition.AppearanceSlots;
 import dev.worldforge.event.WorldForgeEvents;
 import dev.worldforge.network.WorldForgePayloads;
+import dev.worldforge.registry.WorldForgeBlocks;
 import dev.worldforge.registry.WorldForgeItems;
 import dev.worldforge.runtime.WorldForgeRuntimeManager;
 
@@ -50,6 +51,7 @@ public class WorldForge implements ModInitializer {
 		// Order matters: component types -> item -> payloads -> events -> commands.
 		WorldForgeComponents.register();
 		WorldForgeItems.register();
+		WorldForgeBlocks.register(); // v0.4.0: one generic dynamic block + its block entity type
 		WorldForgePayloads.register();
 		dev.worldforge.network.WorldForgeStudioProtocol.register();
 		WorldForgeEvents.register();

@@ -5,6 +5,7 @@ import dev.worldforge.item.DynamicItem;
 import dev.worldforge.network.WorldForgePayloads;
 import dev.worldforge.runtime.WorldForgeRuntimeManager;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 
 /**
@@ -25,9 +26,17 @@ public final class WorldForgeEvents {
 		// World (server) lifecycle: per-world definition isolation + persistence.
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			WorldForgeRuntimeManager.onServerStarted(server);
+			// v0.4.0: bind the per-world virtual BLOCK definitions
+			dev.worldforge.block.BlockRuntimeManager.bind(
+					server.getSavePath(net.minecraft.util.WorldSavePath.ROOT).resolve("worldforge"));
 			// v0.3.0: (re)load the server-side agent config for this session
 			dev.worldforge.ai.AgentBridge.reloadConfig(server);
 		});
+
+		// v0.4.0: reset the periodic-block quota every server tick so a large
+		// field of periodic blocks can never stall the server
+		ServerTickEvents.END_SERVER_TICK.register(server ->
+				dev.worldforge.block.BlockRuntimeManager.beginTick());
 
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
 			WorldForgeRuntimeManager.onServerStopping(server);
@@ -39,6 +48,8 @@ public final class WorldForgeEvents {
 		// definitions lingered and could leak into a later multiplayer session.
 		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
 			WorldForgeRuntimeManager.onServerStopped();
+			// v0.4.0: block definitions are world-bound too
+			dev.worldforge.block.BlockRuntimeManager.release();
 			// v0.3.0: sessions/proposals/provider are world-bound - never reuse
 			// them across worlds/servers (spec 四.5 / test 12)
 			dev.worldforge.ai.AgentBridge.releaseAll();
