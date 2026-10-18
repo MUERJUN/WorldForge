@@ -3,6 +3,7 @@ package dev.worldforge.client.gui;
 import dev.worldforge.ai.AgentConfig;
 import dev.worldforge.ai.AgentConfigStore;
 import dev.worldforge.ai.AgentConnectionTest;
+import dev.worldforge.ai.PasswordEdit;
 import dev.worldforge.ai.SecretInput;
 import dev.worldforge.studio.StudioUiState;
 import net.minecraft.client.MinecraftClient;
@@ -52,8 +53,8 @@ public final class AiSettingsPanel {
 	private String model = "";
 	private boolean enabled = true;
 	private String keyStatus = "未配置";
-	/** the ONLY place a freshly typed key exists; the widget holds asterisks */
-	private SecretInput.State keyState = SecretInput.empty();
+	/** the real editor: owns value, caret and selection; the widget only shows a mask */
+	private PasswordEdit keyEdit = new PasswordEdit();
 	private boolean rewritingKeyField = false;
 	private String statusLine = "§7修改后点「保存」即可生效，无需重启游戏";
 	private String statusColor = "§7";
@@ -92,36 +93,16 @@ public final class AiSettingsPanel {
 			if (rewritingKeyField) {
 				return;
 			}
-			keyState = SecretInput.apply(keyState.real(), text);
-			// the widget is IMMEDIATELY rewritten to asterisks, so the secret is
-			// never rendered, never screenshotted and never copied out of the field
-			rewritingKeyField = true;
-			try {
-				keyField.setText(keyState.display());
-			} finally {
-				rewritingKeyField = false;
-			}
+			// Reconcile a raw widget edit with the editor. Because the widget can
+			// only ever show asterisks, we treat any edit as a replacement of the
+			// whole value when the new text carries no mask character; otherwise we
+			// keep the editor's own state and re-render the mask. The precise
+			// caret/selection behaviour (Backspace, Delete, Home, End, Ctrl+A) is
+			// handled by the key handlers below, which call PasswordEdit directly.
+			keyEdit = reconcile(text);
+			renderKeyField();
 			onDirty.run();
 		});
-		clearKeyButton = ButtonWidget.builder(Text.literal("清除密钥"), b -> {
-			if (!editable()) {
-				refuse();
-				return;
-			}
-			if (store.clearKey()) {
-				keyStatus = "未配置";
-				clearKeyState();
-				refreshLabels();
-				// v0.4.0 review fix: reload the provider NOW. Without this the
-				// old credential could still be used for the next request even
-				// though the player just deleted it. In-flight requests keep the
-				// client they started with, but no NEW request can use the key.
-				host.applyToServer();
-				status("§a已删除本机存储的 API Key，Provider 已立即重载（旧凭据不再用于新请求）");
-			} else {
-				status("§c删除失败：无法写入配置文件（旧凭据仍有效）");
-			}
-		}).position(x + w - 72, rowY).size(72, 18).build();
 		rowY += 26;
 
 		enabledButton = ButtonWidget.builder(Text.literal("AI: 已启用"), b -> {
@@ -150,12 +131,66 @@ public final class AiSettingsPanel {
 
 	/** the API key field is never pre-filled, so a stored key is never echoed */
 	public String keyInput() {
-		return keyState.real().trim();
+		return keyEdit.value().trim();
 	}
 
 	/** the masked key widget, for the automated GUI check */
 	public TextFieldWidget debugKeyField() {
 		return keyField;
+	}
+
+	/**
+	 * Precise editing for the masked key field.
+	 *
+	 * <p>The widget cannot express caret position or selection over asterisks, so
+	 * the real operations are applied to {@link PasswordEdit} here and the widget
+	 * is re-rendered. Returns true when the key was consumed.</p>
+	 */
+	public boolean handleKeyPressed(int keyCode, int scanCode, int modifiers) {
+		boolean ctrl = (modifiers & 2) != 0; // GLFW MOD_CONTROL
+		boolean shift = (modifiers & 1) != 0;
+		switch (keyCode) {
+			case 259 -> { // BACKSPACE
+				keyEdit.backspace();
+			}
+			case 261 -> { // DELETE
+				keyEdit.delete();
+			}
+			case 268 -> { // HOME
+				keyEdit.home();
+			}
+			case 269 -> { // END
+				keyEdit.end();
+			}
+			case 263 -> { // LEFT
+				keyEdit.moveLeft(shift);
+			}
+			case 262 -> { // RIGHT
+				keyEdit.moveRight(shift);
+			}
+			case 65 -> { // A
+				if (!ctrl) {
+					return false;
+				}
+				keyEdit.selectAll();
+			}
+			default -> {
+				return false;
+			}
+		}
+		renderKeyField();
+		return true;
+	}
+
+	/** true when the key field currently has focus */
+	public boolean keyFieldFocused() {
+		return keyField != null && keyField.isFocused();
+	}
+
+	/** insert text at the caret (typing or pasting) */
+	public void handleText(String text) {
+		keyEdit.insert(text);
+		renderKeyField();
 	}
 
 	/** diagnostics: the mask rendered by the widget, and the real length only */
@@ -164,7 +199,7 @@ public final class AiSettingsPanel {
 	}
 
 	public int debugKeyRealLength() {
-		return keyState.real().length();
+		return keyEdit.length();
 	}
 
 	// ---------------------------------------------------------------- state
@@ -242,9 +277,44 @@ public final class AiSettingsPanel {
 		return f == null ? fallback : f.getText().trim();
 	}
 
+	/**
+	 * Map a raw widget edit onto the editor. The widget text is either a mask of
+	 * the current value (a no-op) or new raw characters (a full replacement, as
+	 * happens with select-all + paste).
+	 */
+	private PasswordEdit reconcile(String widgetText) {
+		String text = widgetText == null ? "" : widgetText;
+		if (SecretInput.isMasked(text) && text.length() == keyEdit.length()) {
+			return keyEdit; // the widget already shows our mask
+		}
+		if (SecretInput.isMasked(text) && text.length() != keyEdit.length()) {
+			// a deletion performed through the widget: remove from the end (the
+			// only position a mask can express)
+			while (keyEdit.length() > text.length()) {
+				keyEdit.end().backspace();
+			}
+			return keyEdit;
+		}
+		return keyEdit.setValue(text); // raw replacement
+	}
+
+	/** rewrite the widget with the mask and restore the caret */
+	private void renderKeyField() {
+		if (keyField == null) {
+			return;
+		}
+		rewritingKeyField = true;
+		try {
+			keyField.setText(keyEdit.masked());
+			keyField.setCursor(Math.min(keyEdit.caret(), keyField.getText().length()), false);
+		} finally {
+			rewritingKeyField = false;
+		}
+	}
+
 	/** wipe the masked widget and the secret it mirrors */
 	private void clearKeyState() {
-		keyState = SecretInput.empty();
+		keyEdit = new PasswordEdit();
 		if (keyField != null) {
 			rewritingKeyField = true;
 			try {
@@ -328,14 +398,32 @@ public final class AiSettingsPanel {
 	// ---------------------------------------------------------------- widgets / render
 
 	public List<ButtonWidget> buttons() {
-		return List.of(providerButton, enabledButton, testButton, saveButton, clearKeyButton, backButton);
+		// List.of() rejects nulls; the panel may be queried before init() (the
+		// screen applies visibility every frame), so build the list defensively.
+		java.util.List<ButtonWidget> out = new java.util.ArrayList<>(6);
+		for (ButtonWidget b : new ButtonWidget[]{providerButton, enabledButton, testButton,
+				saveButton, clearKeyButton, backButton}) {
+			if (b != null) {
+				out.add(b);
+			}
+		}
+		return out;
 	}
 
 	public List<TextFieldWidget> fields() {
-		return List.of(baseUrlField, modelField, keyField);
+		java.util.List<TextFieldWidget> out = new java.util.ArrayList<>(3);
+		for (TextFieldWidget f : new TextFieldWidget[]{baseUrlField, modelField, keyField}) {
+			if (f != null) {
+				out.add(f);
+			}
+		}
+		return out;
 	}
 
 	public void applyVisibility(boolean visible) {
+		if (providerButton == null) {
+			return; // not initialised yet (first frames before init())
+		}
 		boolean canEdit = visible && editable();
 		for (var b : buttons()) {
 			b.visible = visible;

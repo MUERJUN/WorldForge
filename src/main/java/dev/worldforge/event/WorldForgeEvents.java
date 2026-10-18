@@ -35,8 +35,12 @@ public final class WorldForgeEvents {
 
 		// v0.4.0: reset the periodic-block quota every server tick so a large
 		// field of periodic blocks can never stall the server
-		ServerTickEvents.END_SERVER_TICK.register(server ->
-				dev.worldforge.block.BlockRuntimeManager.beginTick());
+		ServerTickEvents.END_SERVER_TICK.register(server -> {
+			// v0.4.0 phase 2b: bounded round-robin scheduler drives periodic blocks
+			dev.worldforge.block.PeriodicScheduler.tick();
+			dev.worldforge.block.PeriodicScheduler.runDueTasks(
+					key -> server.getWorld(key));
+		});
 
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
 			WorldForgeRuntimeManager.onServerStopping(server);

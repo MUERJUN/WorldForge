@@ -83,26 +83,29 @@ public class DynamicBlockEntity extends BlockEntity {
 		return be instanceof DynamicBlockEntity d ? d.virtualId() : null;
 	}
 
-	/** server-side tick: periodic emission with a hard quota */
+	/**
+	 * Server-side tick.
+	 *
+	 * <p>v0.4.0 phase 2b: the block entity no longer keeps its own countdown and
+	 * budget. It only REGISTERS itself with {@link PeriodicScheduler}, which is
+	 * idempotent per (world, position) and therefore safe across chunk reloads -
+	 * a reloaded chunk re-registers the block but cannot duplicate the task.</p>
+	 */
 	public void serverTick(World world, BlockPos pos, BlockState state) {
 		BlockDefinition def = definition();
 		if (def == null || !def.periodic()) {
 			return;
 		}
-		int interval = Math.max(1, def.tickIntervalTicks());
-		if (tickCounter < interval) {
-			tickCounter++;
+		if (!(world instanceof net.minecraft.server.world.ServerWorld sw)) {
 			return;
 		}
-		// v0.4.0 fix: only consume the pending tick when the emission actually
-		// ran; a budget-starved block keeps its counter, reports how overdue it
-		// is (so the scheduler can boost it), and retries next tick.
-		int overdue = tickCounter - interval;
-		if (BlockRuntimeManager.runPeriodic(world, pos, def, overdue)) {
-			tickCounter = 0;
-			markDirty();
-		} else {
-			tickCounter = interval + Math.min(overdue + 1, 1000);
+		PeriodicScheduler.register(sw, pos, def.tickIntervalTicks());
+	}
+
+	/** drop the scheduled task for this position (block removed / definition gone) */
+	public static void unschedule(World world, BlockPos pos) {
+		if (world instanceof net.minecraft.server.world.ServerWorld sw) {
+			PeriodicScheduler.cancel(sw.getRegistryKey(), pos);
 		}
 	}
 }

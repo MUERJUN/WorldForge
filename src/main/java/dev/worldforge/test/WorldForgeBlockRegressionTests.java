@@ -5,6 +5,7 @@ import dev.worldforge.block.BlockDefinitionStore;
 import dev.worldforge.block.BlockRuntimeManager;
 import dev.worldforge.block.DynamicBlock;
 import dev.worldforge.block.DynamicBlockEntity;
+import dev.worldforge.block.PeriodicScheduler;
 import dev.worldforge.component.VirtualBlockId;
 import dev.worldforge.component.WorldForgeComponents;
 import dev.worldforge.registry.WorldForgeBlocks;
@@ -98,51 +99,136 @@ public class WorldForgeBlockRegressionTests {
 		ctx.complete();
 	}
 
-	// ---- R3: budget starvation must not skip a whole interval ----
+	// ---- R3: bounded round-robin scheduler - ceiling, eventual service, no dupes ----
 	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-block-regression")
 	public void testR3_periodicBudgetKeepsPendingTick(TestContext ctx) {
 		BlockRuntimeManager.attachStoreForTesting(new BlockDefinitionStore(tempDir("wf-r3")));
+		PeriodicScheduler.reset();
+		var world = ctx.getWorld();
+
 		String id = "worldforge:tick_block";
-		BlockRuntimeManager.create(def(id));
+		BlockRuntimeManager.create(BlockDefinition.create(id, "轮转方块", "", "minecraft:stone",
+				BlockDefinition.Category.PERIODIC, 1.0, List.of(), 1, null, 0));
 
 		BlockPos pos = new BlockPos(1, 1, 1);
 		ctx.setBlockState(pos, WorldForgeBlocks.DYNAMIC_BLOCK.getDefaultState());
 		var abs = ctx.getAbsolutePos(pos);
-		var be = (DynamicBlockEntity) ctx.getWorld().getBlockEntity(abs);
+		var be = (DynamicBlockEntity) world.getBlockEntity(abs);
 		be.setVirtualId(id);
+		be.serverTick(world, abs, world.getBlockState(abs));
 
-		// exhaust the per-tick budget
-		BlockRuntimeManager.beginTick();
-		int ran = 0;
-		for (int i = 0; i < BlockRuntimeManager.PERIODIC_BUDGET_PER_TICK; i++) {
-			if (BlockRuntimeManager.runPeriodic(ctx.getWorld(), abs, BlockRuntimeManager.get(id))) {
-				ran++;
-			}
-		}
-		ctx.assertTrue(ran == BlockRuntimeManager.PERIODIC_BUDGET_PER_TICK,
-				"the budget must allow exactly its quota, ran " + ran);
-		ctx.assertTrue(!BlockRuntimeManager.runPeriodic(ctx.getWorld(), abs, BlockRuntimeManager.get(id)),
-				"over budget the manager must report 'not run' so the caller can retry later");
+		ctx.assertTrue(PeriodicScheduler.queued() == 1, "the periodic block must be queued once");
+		// re-registration is what a chunk reload does: it must NOT duplicate the task
+		be.serverTick(world, abs, world.getBlockState(abs));
+		ctx.assertTrue(PeriodicScheduler.queued() == 1,
+				"REGRESSION: re-registration (chunk reload) duplicated the task, queue="
+						+ PeriodicScheduler.queued());
 
-		// the block entity keeps its pending tick while it is inside the fairness
-		// grace window, and the scheduler must serve it once it is past it
-		int interval = BlockRuntimeManager.get(id).tickIntervalTicks();
-		int window = interval + BlockRuntimeManager.FAIRNESS_GRACE_TICKS + 5;
-		int servedAt = -1;
-		for (int i = 1; i <= window; i++) {
-			be.serverTick(ctx.getWorld(), abs, ctx.getWorld().getBlockState(abs));
-			if (be.tickCounter() == 0) {
-				servedAt = i;
-				break;
-			}
+		boolean executed = false;
+		for (int t = 0; t < 5 && !executed; t++) {
+			PeriodicScheduler.tick();
+			PeriodicScheduler.runDueTasks(key -> world);
+			executed = PeriodicScheduler.totalExecuted() > 0;
 		}
-		ctx.assertTrue(servedAt > 0,
-				"REGRESSION: a budget-starved periodic block was never served within " + window
-						+ " ticks (counter " + be.tickCounter() + ", interval " + interval + ")");
-		ctx.assertTrue(servedAt >= interval,
-				"the block must not fire before its own interval elapsed (served at tick " + servedAt + ")");
-		ctx.assertTrue(BlockRuntimeManager.periodicBoostedThisTick() >= 1,
-				"the boosted emission must be accounted for, not hidden");
+		ctx.assertTrue(executed, "a due periodic block must eventually be executed");
+		ctx.assertTrue(PeriodicScheduler.queued() == 1,
+				"after execution the task must be re-queued for its next due time");
+
+		ctx.assertTrue(PeriodicScheduler.cancel(world.getRegistryKey(), abs), "cancel must succeed");
+		ctx.assertTrue(PeriodicScheduler.queued() == 0, "a cancelled task must leave the queue");
+		ctx.assertTrue(!PeriodicScheduler.isRegistered(world.getRegistryKey(), abs),
+				"a cancelled position must no longer be registered");
+
+		BlockRuntimeManager.release();
+		ctx.complete();
+	}
+
+	// ---- R3b: 100 / 129 / 256 / 512 continuously-due blocks under the 128 ceiling ----
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-block-regression")
+	public void testR3b_largeFieldsNeverStarve(TestContext ctx) {
+		BlockRuntimeManager.attachStoreForTesting(new BlockDefinitionStore(tempDir("wf-r3b")));
+		PeriodicScheduler.reset();
+		var world = ctx.getWorld();
+		String id = "worldforge:hot";
+		BlockRuntimeManager.create(BlockDefinition.create(id, "高频方块", "", "minecraft:stone",
+				BlockDefinition.Category.PERIODIC, 1.0, List.of(), 1, null, 0));
+
+		int[] sizes = {100, 129, 256, 512};
+		for (int n : sizes) {
+			PeriodicScheduler.reset();
+			// The scheduler resolves a task through the block entity at its
+			// position, so the stress field must be REAL placed blocks - that is
+			// also what makes this a genuine end-to-end load test.
+			var positions = new java.util.ArrayList<BlockPos>();
+			for (int i = 0; i < n; i++) {
+				BlockPos local = new BlockPos(i % 16, 1, i / 16);
+				ctx.setBlockState(local, WorldForgeBlocks.DYNAMIC_BLOCK.getDefaultState());
+				BlockPos abs = ctx.getAbsolutePos(local);
+				var be = (DynamicBlockEntity) world.getBlockEntity(abs);
+				be.setVirtualId(id);
+				be.serverTick(world, abs, world.getBlockState(abs)); // registers
+				positions.add(abs);
+			}
+			ctx.assertTrue(PeriodicScheduler.queued() == n,
+					"n=" + n + ": all blocks must be queued, got " + PeriodicScheduler.queued());
+
+			int ticksNeeded = (int) Math.ceil((double) n / PeriodicScheduler.MAX_PER_TICK) + 2;
+			for (int t = 0; t < ticksNeeded; t++) {
+				PeriodicScheduler.tick();
+				PeriodicScheduler.runDueTasks(key -> world);
+				ctx.assertTrue(PeriodicScheduler.executedThisTick() <= PeriodicScheduler.MAX_PER_TICK,
+						"n=" + n + " tick " + t + " exceeded the per-tick ceiling: "
+								+ PeriodicScheduler.executedThisTick());
+			}
+			ctx.assertTrue(PeriodicScheduler.totalExecuted() >= n,
+					"n=" + n + ": only " + PeriodicScheduler.totalExecuted()
+							+ " executions in " + ticksNeeded + " ticks - some blocks starved");
+			ctx.assertTrue(PeriodicScheduler.queued() == n,
+					"n=" + n + ": every task must stay queued for the next period, queue="
+							+ PeriodicScheduler.queued());
+
+			// clean the field so the next size starts from an empty world
+			for (BlockPos abs : positions) {
+				PeriodicScheduler.cancel(world.getRegistryKey(), abs);
+			}
+			ctx.assertTrue(PeriodicScheduler.queued() == 0, "field cleanup must empty the queue");
+		}
+
+		BlockRuntimeManager.release();
+		ctx.complete();
+	}
+
+	// ---- R5: cancellation - block removal, definition deletion, world unload ----
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-block-regression")
+	public void testR5_schedulerCleansUpCorrectly(TestContext ctx) {
+		BlockRuntimeManager.attachStoreForTesting(new BlockDefinitionStore(tempDir("wf-r5")));
+		PeriodicScheduler.reset();
+		var world = ctx.getWorld();
+		String id = "worldforge:cleanup";
+		BlockRuntimeManager.create(BlockDefinition.create(id, "清理方块", "", "minecraft:stone",
+				BlockDefinition.Category.PERIODIC, 1.0, List.of(), 1, null, 0));
+
+		BlockPos a = new BlockPos(1, 1, 1);
+		BlockPos b = new BlockPos(2, 1, 1);
+		PeriodicScheduler.register(world, a, 1);
+		PeriodicScheduler.register(world, b, 1);
+		ctx.assertTrue(PeriodicScheduler.queued() == 2, "both tasks queued");
+
+		ctx.assertTrue(PeriodicScheduler.cancel(world.getRegistryKey(), a), "cancel(a)");
+		ctx.assertTrue(PeriodicScheduler.queued() == 1, "only the removed block's task is gone");
+		ctx.assertTrue(PeriodicScheduler.isRegistered(world.getRegistryKey(), b), "b stays scheduled");
+
+		BlockRuntimeManager.delete(id);
+		PeriodicScheduler.tick();
+		PeriodicScheduler.runDueTasks(key -> world);
+		ctx.assertTrue(PeriodicScheduler.queued() == 0,
+				"a deleted definition must stop executing, queue=" + PeriodicScheduler.queued());
+
+		PeriodicScheduler.register(world, a, 1);
+		PeriodicScheduler.register(world, b, 1);
+		int removed = PeriodicScheduler.cancelWorld(world.getRegistryKey());
+		ctx.assertTrue(removed == 2 && PeriodicScheduler.queued() == 0,
+				"world unload must clear all tasks of that dimension, removed=" + removed);
 
 		BlockRuntimeManager.release();
 		ctx.complete();

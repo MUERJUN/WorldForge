@@ -471,6 +471,11 @@ public class WorldForgeStudioScreen extends Screen {
 		if (ui.aiVisible() && (keyCode == 257 || keyCode == 335) && aiPanel.onEnter()) {
 			return true; // ENTER sends in the AI panel
 		}
+		// v0.4.0 phase 2b: the masked key field owns caret/selection semantics
+		if (ui.settingsVisible() && settingsPanel != null && settingsPanel.keyFieldFocused()
+				&& settingsPanel.handleKeyPressed(keyCode, scanCode, modifiers)) {
+			return true;
+		}
 		if (keyCode == 256) { // GLFW_ESCAPE
 			switch (ui.pressEsc()) {
 				case CANCEL_PROPOSAL -> {
@@ -1203,6 +1208,15 @@ public class WorldForgeStudioScreen extends Screen {
 
 	private static boolean inZone(int[] z, double mx, double my) {
 		return mx >= z[0] && mx <= z[2] && my >= z[1] && my <= z[3];
+	}
+
+	@Override
+	public boolean charTyped(char chr, int modifiers) {
+		if (ui.settingsVisible() && settingsPanel != null && settingsPanel.keyFieldFocused()) {
+			settingsPanel.handleText(String.valueOf(chr));
+			return true;
+		}
+		return super.charTyped(chr, modifiers);
 	}
 
 	@Override
