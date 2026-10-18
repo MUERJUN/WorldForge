@@ -30,7 +30,8 @@
 			"dev.worldforge.test.WorldForgeBlockRegressionTests",
 			"dev.worldforge.test.WorldForgeBlockToolTests",
 			"dev.worldforge.test.WorldForgeBlockLifecycleTests",
-			"dev.worldforge.test.WorldForgeChunkLifecycleTests"
+			"dev.worldforge.test.WorldForgeChunkLifecycleTests",
+			"dev.worldforge.test.WorldForgeSurvivalBreakTests"
 		]
 	},
 	"depends": {

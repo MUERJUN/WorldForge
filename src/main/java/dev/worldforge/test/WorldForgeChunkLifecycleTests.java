@@ -57,11 +57,11 @@ public class WorldForgeChunkLifecycleTests {
 		bindStore();
 		var server = ctx.getWorld().getServer();
 		var world = (ServerWorld) ctx.getWorld();
-		BlockPos pos = ctx.getAbsolutePos(new BlockPos(200, 1, 200));
+		BlockPos pos = ctx.getAbsolutePos(new BlockPos(1000, 1, 1000));
 		ChunkPos cpos = new ChunkPos(pos);
 
 		// 1) create a definition and place the block
-		BlockRuntimeManager.bind(tempDir("wf-chunk-cl1-world"));
+		// store is already attached; no world bind needed for this test
 		WorldForgeBlockTools.createBlock(server, BlockDefinition.create(
 				"worldforge:cl1_block", "CL1测试方块", "",
 				"minecraft:furnace", BlockDefinition.Category.DECORATION, 2.0,
@@ -126,10 +126,10 @@ public class WorldForgeChunkLifecycleTests {
 		bindStore();
 		var server = ctx.getWorld().getServer();
 		var world = (ServerWorld) ctx.getWorld();
-		BlockPos pos = ctx.getAbsolutePos(new BlockPos(200, 1, 200));
+		BlockPos pos = ctx.getAbsolutePos(new BlockPos(500, 1, 500));
 		ChunkPos cpos = new ChunkPos(pos);
 
-		BlockRuntimeManager.bind(tempDir("wf-chunk-cl2-world"));
+		// store is already attached; no world bind needed for this test
 		WorldForgeBlockTools.createBlock(server, BlockDefinition.create(
 				"worldforge:cl2_block", "原始名称", "",
 				"minecraft:stone", BlockDefinition.Category.DECORATION, 2.0,
@@ -182,10 +182,10 @@ public class WorldForgeChunkLifecycleTests {
 		bindStore();
 		var server = ctx.getWorld().getServer();
 		var world = (ServerWorld) ctx.getWorld();
-		BlockPos pos = ctx.getAbsolutePos(new BlockPos(200, 1, 200));
+		BlockPos pos = ctx.getAbsolutePos(new BlockPos(500, 1, 500));
 		ChunkPos cpos = new ChunkPos(pos);
 
-		BlockRuntimeManager.bind(tempDir("wf-chunk-cl3-world"));
+		// store is already attached; no world bind needed for this test
 		WorldForgeBlockTools.createBlock(server, BlockDefinition.create(
 				"worldforge:cl3_block", "CL3方块", "",
 				"minecraft:gold_block", BlockDefinition.Category.DECORATION, 2.0,
