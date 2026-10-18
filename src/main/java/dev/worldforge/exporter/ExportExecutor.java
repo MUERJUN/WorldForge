@@ -36,6 +36,9 @@ public final class ExportExecutor {
 			Files.createDirectories(projectDir);
 			var gen = new TemplateProjectGenerator(req, projectDir);
 			gen.generate();
+			// copy Gradle wrapper from WorldForge's own project
+			var wfRoot = Path.of(".").toAbsolutePath();
+			gen.copyGradleWrapper(wfRoot);
 		} catch (Exception e) {
 			return new ModExporter.ExportResult(false, projectDir, null, null,
 					"项目生成失败: " + e.getMessage(), warnings);

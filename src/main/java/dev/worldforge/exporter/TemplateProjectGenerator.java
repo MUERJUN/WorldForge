@@ -17,17 +17,17 @@ import java.util.List;
  * ever inserted as raw Java. IDs, names, and parameters are validated and
  * escaped before insertion.</p>
  */
-final class TemplateProjectGenerator {
+public final class TemplateProjectGenerator {
 
 	private final ModExporter.ExportRequest req;
 	private final Path root;
 
-	TemplateProjectGenerator(ModExporter.ExportRequest req, Path root) {
+	public TemplateProjectGenerator(ModExporter.ExportRequest req, Path root) {
 		this.req = req;
 		this.root = root;
 	}
 
-	void generate() throws IOException {
+	public void generate() throws IOException {
 		// directory structure
 		var src = root.resolve("src/main/java/" + req.modId().replace("_", "/"));
 		var res = root.resolve("src/main/resources");
@@ -38,6 +38,7 @@ final class TemplateProjectGenerator {
 		writeBuildGradle();
 		writeSettingsGradle();
 		writeGradleProperties();
+		writeLicense();
 		writeFabricModJson(res);
 
 		// Java source
@@ -113,9 +114,73 @@ final class TemplateProjectGenerator {
 				""");
 	}
 
+	private void writeLicense() throws IOException {
+		Files.writeString(root.resolve("LICENSE"), """
+				MIT License
+
+				Copyright (c) 2024 WorldForge Export
+
+				Permission is hereby granted, free of charge, to any person obtaining a copy
+				of this software and associated documentation files (the "Software"), to deal
+				in the Software without restriction, including without limitation the rights
+				to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+				copies of the Software, and to permit persons to whom the Software is
+				furnished to do so, subject to the following conditions:
+
+				The above copyright notice and this permission notice shall be included in all
+				copies or substantial portions of the Software.
+
+				THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+				""");
+	}
+
+	/**
+	 * Copy the Gradle wrapper from the WorldForge project so the generated
+	 * project can build standalone without a system Gradle install.
+	 */
+	public void copyGradleWrapper(Path sourceProjectRoot) throws IOException {
+		var wrapperDir = root.resolve("gradle/wrapper");
+		Files.createDirectories(wrapperDir);
+		// gradle-wrapper.properties
+		var propsSrc = sourceProjectRoot.resolve("gradle/wrapper/gradle-wrapper.properties");
+		if (Files.exists(propsSrc)) {
+			Files.copy(propsSrc, wrapperDir.resolve("gradle-wrapper.properties"),
+					java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+		} else {
+			Files.writeString(wrapperDir.resolve("gradle-wrapper.properties"),
+					"distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14.3-bin.zip\n"
+					+ "distributionType=bin\n");
+		}
+		// gradle-wrapper.jar
+		var jarSrc = sourceProjectRoot.resolve("gradle/wrapper/gradle-wrapper.jar");
+		if (Files.exists(jarSrc)) {
+			Files.copy(jarSrc, wrapperDir.resolve("gradle-wrapper.jar"),
+					java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+		}
+		// gradlew / gradlew.bat
+		for (String name : new String[]{"gradlew", "gradlew.bat"}) {
+			var src = sourceProjectRoot.resolve(name);
+			if (Files.exists(src)) {
+				Files.copy(src, root.resolve(name),
+						java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+			}
+		}
+	}
+
 	private void writeSettingsGradle() throws IOException {
 		Files.writeString(root.resolve("settings.gradle"),
-				"rootProject.name = \"" + req.modId() + "\"\n");
+				"pluginManagement {\n"
+				+ "    repositories {\n"
+				+ "        maven {\n"
+				+ "            name = 'FabricMC'\n"
+				+ "            url = 'https://maven.fabricmc.net/'\n"
+				+ "        }\n"
+				+ "        mavenCentral()\n"
+				+ "        gradlePluginPortal()\n"
+				+ "    }\n"
+				+ "}\n"
+				+ "\n"
+				+ "rootProject.name = \"" + req.modId() + "\"\n");
 	}
 
 	private void writeGradleProperties() throws IOException {
