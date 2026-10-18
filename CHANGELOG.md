@@ -1,5 +1,22 @@
 # 更新日志
 
+## v0.5.0 已发布 — 独立 Mod JAR 导出器
+
+**导出器**：玩家在 WorldForge Studio 中创建的物品和方块可以导出为独立 Fabric Mod JAR，不依赖 WorldForge 本体。
+
+- **模板项目生成**：完整的 Fabric 1.21.1 项目（build.gradle、settings.gradle、fabric.mod.json、Java 源码、语言文件、模型文件、Gradle Wrapper）
+- **真实注册**：导出的 Mod 在启动阶段通过 `Registry.register` 注册独立的 Item 和 Block，不是虚拟代理
+- **安全验证**：Mod ID 路径穿越/Shell 注入拒绝、输出目录非空拒绝、不支持的能力明确警告
+- **无密钥泄漏**：API Key、agent.json、世界存档不打包进 JAR
+- **独立实例验证**：导出的 JAR 在仅安装 Fabric API 的 Minecraft 1.21.1 实例中成功加载，GameTest 2/2 通过
+- **导出 JAR**：`standalone_mod-1.0.0.jar`（6789 字节），SHA-256 `29a4f401...`
+
+**v0.4.1 生存模式验证**：
+
+- 生存模式破坏动态方块 → 恰好 1 个掉落物 → 携带正确 VirtualBlockId → 重放恢复身份
+- 创造模式破坏不产生掉落
+- 全部通过真实客户端自动化验证（30 步 ALL CHECKS PASSED）
+
 ## v0.4.0 已发布 — 动态方块引擎
 
 **虚拟方块（不注册新方块）**：启动期只注册 1 个通用 `worldforge:dynamic_block` + 1 个 BlockEntity 类型 + 1 个方块物品；玩家的每个"虚拟方块"是它的实例，身份存于 BlockEntity（`worldforge:virtual_block_id` 数据组件 → 放置时写入 BE → NBT 持久化）。

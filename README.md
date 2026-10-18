@@ -7,14 +7,14 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 - 游戏版本：Minecraft Java **1.21.1**
 - 加载器：Fabric Loader **0.16.9** + Fabric API **0.116.5+1.21.1**
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**
-- 当前版本：**v0.4.0 已发布**（动态方块引擎）
+- 当前版本：**v0.5.0 已发布**（独立 Mod JAR 导出器）
 
 ---
 
 ## 快速开始
 
 ```bash
-./gradlew build           # 编译 + JUnit 88 项
+./gradlew build           # 编译 + JUnit 110 项
 ./gradlew runGameTest     # 真实服务端 GameTest 61 项
 ./gradlew runClient       # 进游戏：按 K 打开 Studio
 ```
@@ -197,9 +197,10 @@ src/client/java/dev/worldforge/client/
 
 | 测试 | 数量 | 方式 |
 |---|---|---|
-| JUnit | 88 项 | `./gradlew test` |
+| JUnit | 110 项 | `./gradlew test` |
 | GameTest | 61 项 | `./gradlew runGameTest` |
-| 客户端自动化 | 28 步 | `./gradlew runClient`（需 flag） |
+| 客户端自动化 | 30 步 | `./gradlew runClient`（需 flag） |
+| 独立 Mod 导出 | ✅ 已验证 | 导出 JAR 在无 WorldForge 实例中加载 |
 
 GameTest 覆盖：物品创建/修改/删除/持久化/同步/行为/失效/跨存档隔离/损坏恢复 + 方块定义/放置/身份/破坏/热修改/失效/调度压力/AI 提案端到端/类型隔离。
 

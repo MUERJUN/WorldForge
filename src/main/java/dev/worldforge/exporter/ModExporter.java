@@ -59,6 +59,8 @@ public final class ModExporter {
 		}
 		if (req.modName() == null || req.modName().isBlank() || req.modName().length() > 64) {
 			errors.add("Mod 名称不能为空且不超过 64 字符");
+		} else if (req.modName().chars().anyMatch(c -> c < 0x20 && c != '\t' || c == ';' || c == '|' || c == '`' || c == '$' || c == '\n' || c == '\r')) {
+			errors.add("Mod 名称包含不允许的特殊字符");
 		}
 		if (req.modVersion() == null || !req.modVersion().matches("\\d+\\.\\d+\\.\\d+")) {
 			errors.add("版本号格式必须为 X.Y.Z");
@@ -76,6 +78,7 @@ public final class ModExporter {
 		}
 		if (req.itemIds() == null || req.blockIds() == null) {
 			errors.add("物品和方块 ID 列表不能为 null");
+			return errors; // can't continue validation with null lists
 		}
 		// validate each item ID exists and is exportable
 		for (String id : req.itemIds()) {
