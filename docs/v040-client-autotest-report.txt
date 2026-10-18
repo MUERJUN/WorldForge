@@ -88,4 +88,11 @@
 [PASS] renderer resolves a catalog appearance
 [PASS] different virtual ids resolve different appearances
 [SHOT] wf-autotest-23-24-world-blocks-close.png
+[SHOT] wf-autotest-24-25-hot-edit.png
+[PASS] hot-edit updated client mirror
+[PASS] hot-edit changed appearance
+[SHOT] wf-autotest-25-26-hot-edit-verify.png
+[SHOT] wf-autotest-26-27-delete.png
+[PASS] delete removed from client mirror
+[SHOT] wf-autotest-27-28-delete-fallback.png
 [RESULT] ALL CHECKS PASSED

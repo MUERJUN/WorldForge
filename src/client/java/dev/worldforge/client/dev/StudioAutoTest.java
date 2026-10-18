@@ -436,6 +436,72 @@ public final class StudioAutoTest {
 					shot(client, "24-world-blocks-close");
 				}
 				case 24 -> {
+					if (client.world == null || placedBlocks == 0) {
+						report.add("[SKIP] hot-edit check: no loaded world in this run");
+						wait(5);
+						break;
+					}
+					// hot-edit: change demo_furnace appearance from furnace to iron_block
+					var server = client.getServer();
+					if (server != null) {
+						server.execute(() -> {
+							dev.worldforge.tool.WorldForgeBlockTools.updateBlock(server,
+									dev.worldforge.block.BlockDefinition.create(
+											"worldforge:demo_furnace", "更新熔炉", "",
+											"minecraft:iron_block",
+											dev.worldforge.block.BlockDefinition.Category.INTERACTIVE,
+											3.0, java.util.List.of(), 200, null, 0));
+							dev.worldforge.network.WorldForgePayloads.syncToAll(server);
+						});
+					}
+					wait(20);
+					shot(client, "25-hot-edit");
+				}
+				case 25 -> {
+					if (client.world == null || placedBlocks == 0) {
+						report.add("[SKIP] hot-edit verify: no loaded world");
+						wait(5);
+						break;
+					}
+					// verify the client mirror reflects the updated appearance
+					var updated = dev.worldforge.client.ClientBlockState.get("worldforge:demo_furnace");
+					check("hot-edit updated client mirror", updated != null);
+					if (updated != null) {
+						check("hot-edit changed appearance",
+								"minecraft:iron_block".equals(updated.appearance()));
+					}
+					shot(client, "26-hot-edit-verify");
+				}
+				case 26 -> {
+					if (client.world == null || placedBlocks == 0) {
+						report.add("[SKIP] delete check: no loaded world");
+						wait(5);
+						break;
+					}
+					// delete demo_gold and sync
+					var server = client.getServer();
+					if (server != null) {
+						server.execute(() -> {
+							dev.worldforge.tool.WorldForgeBlockTools.deleteBlock(server,
+									"worldforge:demo_gold");
+							dev.worldforge.network.WorldForgePayloads.syncToAll(server);
+						});
+					}
+					wait(20);
+					shot(client, "27-delete");
+				}
+				case 27 -> {
+					if (client.world == null || placedBlocks == 0) {
+						report.add("[SKIP] delete verify: no loaded world");
+						wait(5);
+						break;
+					}
+					// verify the client mirror no longer has the deleted definition
+					var deleted = dev.worldforge.client.ClientBlockState.get("worldforge:demo_gold");
+					check("delete removed from client mirror", deleted == null);
+					shot(client, "28-delete-fallback");
+				}
+				case 28 -> {
 					finish(client);
 				}
 				default -> {
