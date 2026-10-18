@@ -61,6 +61,69 @@ public final class TemplateProjectGenerator {
 		// resources
 		writeLangFile(res);
 		writeModelFiles(res);
+
+		// GameTest that verifies items/blocks are registered at runtime
+		writeGameTest(src, res);
+	}
+
+	private void writeGameTest(Path src, Path res) throws IOException {
+		// Generate a GameTest class that verifies registration
+		var sb = new StringBuilder();
+		sb.append("package ").append(req.modId().replace("_", ".")).append(";\n\n");
+		sb.append("import net.minecraft.registry.Registries;\n");
+		sb.append("import net.minecraft.test.GameTest;\n");
+		sb.append("import net.minecraft.test.TestContext;\n");
+		sb.append("import net.minecraft.util.Identifier;\n\n");
+		sb.append("public class ExportedModTest {\n");
+		int testNum = 0;
+		for (String id : req.itemIds()) {
+			ItemDefinition def = WorldForgeRuntimeManager.get(id);
+			if (def == null) continue;
+			var nativeId = nativeItemId(id);
+			testNum++;
+			sb.append("\t@GameTest(batchId = \"exported\")\n");
+			sb.append("\tpublic static void itemRegistered").append(testNum)
+					.append("(TestContext ctx) {\n");
+			sb.append("\t\tvar item = Registries.ITEM.get(Identifier.of(\"")
+					.append(req.modId()).append("\", \"").append(nativeId).append("\"));\n");
+			sb.append("\t\tif (item == null || item == net.minecraft.item.Items.AIR) {\n");
+			sb.append("\t\t\tthrow new AssertionError(\"Item ").append(nativeId)
+					.append(" not registered\");\n");
+			sb.append("\t\t}\n");
+			sb.append("\t\tctx.complete();\n");
+			sb.append("\t}\n\n");
+		}
+		for (String id : req.blockIds()) {
+			BlockDefinition def = BlockRuntimeManager.get(id);
+			if (def == null) continue;
+			var nativeId = nativeBlockId(id);
+			testNum++;
+			sb.append("\t@GameTest(batchId = \"exported\")\n");
+			sb.append("\tpublic static void blockRegistered").append(testNum)
+					.append("(TestContext ctx) {\n");
+			sb.append("\t\tvar block = Registries.BLOCK.get(Identifier.of(\"")
+					.append(req.modId()).append("\", \"").append(nativeId).append("\"));\n");
+			sb.append("\t\tif (block == null || block == net.minecraft.block.Blocks.AIR) {\n");
+			sb.append("\t\t\tthrow new AssertionError(\"Block ").append(nativeId)
+					.append(" not registered\");\n");
+			sb.append("\t\t}\n");
+			sb.append("\t\tctx.complete();\n");
+			sb.append("\t}\n\n");
+		}
+		sb.append("}\n");
+		Files.writeString(src.resolve("ExportedModTest.java"), sb.toString());
+
+		// Register the test entrypoint in fabric.mod.json
+		// (we need to update the existing fabric.mod.json to add the test entrypoint)
+		var modJsonPath = res.resolve("fabric.mod.json");
+		var modJson = Files.readString(modJsonPath);
+		if (!modJson.contains("test")) {
+			modJson = modJson.replace(
+					"\"main\": [\"" + req.modId().replace("_", ".") + "." + mainClassName() + "\"]",
+					"\"main\": [\"" + req.modId().replace("_", ".") + "." + mainClassName() + "\"],\n"
+					+ "        \"test\": [\"" + req.modId().replace("_", ".") + ".ExportedModTest\"]");
+			Files.writeString(modJsonPath, modJson);
+		}
 	}
 
 	private void writeBuildGradle() throws IOException {
