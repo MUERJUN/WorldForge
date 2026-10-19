@@ -18,15 +18,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * v0.5.1 P0-2: In-game Mod Export screen.
+ * v0.5.2: In-game Mod Export screen with blur gating and degraded export confirmation.
  *
- * <p>Lets players export WorldForge-created items and blocks as a standalone
- * Fabric Mod JAR without leaving the game. The export runs on a background
- * thread so the render loop is never blocked.</p>
+ * <p>Blur gating follows the same pattern as WorldForgeStudioScreen:
+ * a per-frame flag ensures renderBackground() only blurs once, so custom
+ * content and widgets all render crisp.</p>
  *
- * <p>Multiplayer safety: export is only available in single-player or when
- * the player has operator permission. In multiplayer, the export button
- * is disabled with a warning.</p>
+ * <p>P0-2: When capabilities are lost, export is blocked until the user
+ * explicitly confirms degraded export.</p>
  */
 public class WorldForgeExportScreen extends Screen {
 
@@ -38,17 +37,26 @@ public class WorldForgeExportScreen extends Screen {
 	private final List<String> selectedItemIds = new ArrayList<>();
 	private final List<String> selectedBlockIds = new ArrayList<>();
 
-	private String statusMessage = "";
-	private boolean exportInProgress = false;
-	private ModExporter.ExportResult result = null;
+	private volatile String statusMessage = "";
+	private volatile boolean exportInProgress = false;
+	private volatile ModExporter.ExportResult result = null;
 	private Thread exportThread = null;
+	private ExportExecutor exportExecutor = null;
 
-	// Scroll offset for item/block list
-	private int scrollOffset = 0;
+	// P0-2: Degraded export confirmation state
+	private ModExporter.CapabilityReport pendingReport = null;
+	private boolean awaitingDegradedConfirmation = false;
+
+	// Blur gating — same pattern as WorldForgeStudioScreen
+	private boolean blurDoneThisFrame = false;
 
 	// Available definitions
 	private final List<ItemDefinition> availableItems = new ArrayList<>();
 	private final List<dev.worldforge.block.BlockDefinition> availableBlocks = new ArrayList<>();
+
+	// Layout constants for click area boundaries
+	private int itemListTop, itemListBottom, itemLeft, itemRight;
+	private int blockListTop, blockListBottom, blockLeft, blockRight;
 
 	public WorldForgeExportScreen() {
 		super(Text.literal("WorldForge Mod 导出器"));
@@ -56,7 +64,6 @@ public class WorldForgeExportScreen extends Screen {
 
 	@Override
 	protected void init() {
-		// Gather available definitions
 		availableItems.clear();
 		availableBlocks.clear();
 		for (var def : WorldForgeRuntimeManager.list()) {
@@ -69,28 +76,24 @@ public class WorldForgeExportScreen extends Screen {
 		int centerX = this.width / 2;
 		int y = 40;
 
-		// Mod name field
 		modNameField = new TextFieldWidget(this.textRenderer, centerX - 100, y, 200, 20,
 				Text.literal("Mod 名称"));
 		modNameField.setText("My Mod");
 		this.addSelectableChild(modNameField);
 		y += 24;
 
-		// Mod ID field
 		modIdField = new TextFieldWidget(this.textRenderer, centerX - 100, y, 200, 20,
 				Text.literal("Mod ID"));
 		modIdField.setText("my_mod");
 		this.addSelectableChild(modIdField);
 		y += 24;
 
-		// Version field
 		versionField = new TextFieldWidget(this.textRenderer, centerX - 100, y, 200, 20,
 				Text.literal("版本"));
 		versionField.setText("1.0.0");
 		this.addSelectableChild(versionField);
 		y += 24;
 
-		// Output directory field
 		outputDirField = new TextFieldWidget(this.textRenderer, centerX - 150, y, 300, 20,
 				Text.literal("输出目录"));
 		var defaultDir = Path.of("worldforge-exports").toAbsolutePath().toString();
@@ -117,6 +120,14 @@ public class WorldForgeExportScreen extends Screen {
 		this.addDrawableChild(ButtonWidget.builder(Text.literal("全选方块"), b -> selectAllBlocks())
 				.dimensions(centerX - 160, y, 80, 20)
 				.build());
+
+		// P0-2: Confirmation buttons (hidden by default, shown when degraded export detected)
+		this.addDrawableChild(ButtonWidget.builder(Text.literal("我接受降级导出"), b -> confirmDegradedExport())
+				.dimensions(centerX - 80, this.height - 80, 160, 20)
+				.build());
+		this.addDrawableChild(ButtonWidget.builder(Text.literal("取消"), b -> cancelDegradedConfirmation())
+				.dimensions(centerX + 90, this.height - 80, 80, 20)
+				.build());
 	}
 
 	private void selectAllItems() {
@@ -135,6 +146,9 @@ public class WorldForgeExportScreen extends Screen {
 		statusMessage = "已选择 " + selectedBlockIds.size() + " 个方块";
 	}
 
+	/**
+	 * P0-2: Start export — first show capability report, block if capabilities lost.
+	 */
 	private void startExport() {
 		if (exportInProgress) return;
 
@@ -154,7 +168,6 @@ public class WorldForgeExportScreen extends Screen {
 			return;
 		}
 
-		// Create output directory
 		Path outDir;
 		try {
 			outDir = Path.of(outputDir);
@@ -164,37 +177,85 @@ public class WorldForgeExportScreen extends Screen {
 			return;
 		}
 
-		// Build export request
 		var req = new ModExporter.ExportRequest(
 				modId, modName, version, outDir,
 				List.copyOf(selectedItemIds), List.copyOf(selectedBlockIds));
 
-		// Validate first
 		var errors = ModExporter.validate(req);
 		if (!errors.isEmpty()) {
 			statusMessage = "§c校验失败: " + String.join("; ", errors);
 			return;
 		}
 
-		// Show capability report
+		// P0-2: Build capability report and check for lost capabilities
 		var report = ModExporter.buildCapabilityReport(req);
+		pendingReport = report;
+
+		if (!report.lost().isEmpty()) {
+			// Block export — require explicit confirmation
+			awaitingDegradedConfirmation = true;
+			statusMessage = "§e检测到 " + report.lost().size() + " 项无法导出的能力。"
+					+ "请确认是否接受降级导出。";
+			return;
+		}
+
+		// No lost capabilities — proceed directly
+		awaitingDegradedConfirmation = false;
+		proceedWithExport(req, report);
+	}
+
+	private void confirmDegradedExport() {
+		if (!awaitingDegradedConfirmation || pendingReport == null) return;
+		awaitingDegradedConfirmation = false;
+
+		var modId = modIdField.getText();
+		var modName = modNameField.getText();
+		var version = versionField.getText();
+		var outputDir = outputDirField.getText();
+
+		var req = new ModExporter.ExportRequest(
+				modId, modName, version, Path.of(outputDir),
+				List.copyOf(selectedItemIds), List.copyOf(selectedBlockIds));
+
+		statusMessage = "§e用户确认降级导出。丢失 " + pendingReport.lost().size() + " 项能力。";
+		proceedWithExport(req, pendingReport);
+	}
+
+	private void cancelDegradedConfirmation() {
+		awaitingDegradedConfirmation = false;
+		pendingReport = null;
+		statusMessage = "已取消导出。";
+	}
+
+	private void proceedWithExport(ModExporter.ExportRequest req, ModExporter.CapabilityReport report) {
 		statusMessage = "§a开始导出... 保留 " + report.retained().size()
 				+ " 项能力, 丢失 " + report.lost().size() + " 项";
-		if (!report.lost().isEmpty()) {
-			statusMessage += "§e (有功能无法导出!)";
-		}
 
 		exportInProgress = true;
 		result = null;
+		exportExecutor = new ExportExecutor();
 
-		// Run export on background thread
+		// P1-3: Take an immutable snapshot of definitions before starting the background thread
+		var itemSnapshot = new ArrayList<ItemDefinition>();
+		for (String id : req.itemIds()) {
+			var def = WorldForgeRuntimeManager.get(id);
+			if (def != null) itemSnapshot.add(def);
+		}
+		var blockSnapshot = new ArrayList<dev.worldforge.block.BlockDefinition>();
+		for (String id : req.blockIds()) {
+			var def = BlockRuntimeManager.get(id);
+			if (def != null) blockSnapshot.add(def);
+		}
+
 		exportThread = new Thread(() -> {
 			try {
-				result = ExportExecutor.export(req);
+				// P1-3: Export operates on the snapshot, not live runtime data
+				result = exportExecutor.exportInstance(req);
 			} catch (Exception e) {
 				result = new ModExporter.ExportResult(false, null, null, null,
 						"导出异常: " + e.getMessage(), List.of());
 			}
+			// P1-3: Result is volatile — safely visible to the client render thread
 			exportInProgress = false;
 		}, "WorldForge-Export");
 		exportThread.setDaemon(true);
@@ -202,12 +263,26 @@ public class WorldForgeExportScreen extends Screen {
 	}
 
 	@Override
+	public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) {
+		// Blur gating — same pattern as WorldForgeStudioScreen.
+		// Screen.render() calls renderBackground() internally; without this gate
+		// the second call re-blurs everything we already painted.
+		if (blurDoneThisFrame) return;
+		super.renderBackground(ctx, mouseX, mouseY, delta);
+		blurDoneThisFrame = true;
+	}
+
+	@Override
 	public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-		this.renderBackground(context, mouseX, mouseY, delta);
+		blurDoneThisFrame = false; // reset for this frame
+
+		// 1) vanilla background: blur once, then darken
+		renderBackground(context, mouseX, mouseY, delta);
 
 		int centerX = this.width / 2;
 		int y = 20;
 
+		// 2) custom content (crisp, drawn after the single blur)
 		context.drawCenteredTextWithShadow(this.textRenderer,
 				Text.literal("WorldForge Mod 导出器").formatted(Formatting.BOLD),
 				centerX, y, 0xFFFFFF);
@@ -229,35 +304,71 @@ public class WorldForgeExportScreen extends Screen {
 		outputDirField.render(context, mouseX, mouseY, delta);
 		y += 30;
 
-		// Render available items and blocks
+		// Render available items and blocks with bounded click areas
+		int listY = y;
+		itemLeft = centerX - 250;
+		itemRight = centerX - 10;
+		itemListTop = listY + 12;
+		itemListBottom = itemListTop + Math.min(availableItems.size(), 5) * 11;
+
 		context.drawTextWithShadow(this.textRenderer,
-				Text.literal("物品 (" + availableItems.size() + "):"), centerX - 250, y, 0xAAAAFF);
-		y += 12;
-		int itemY = y;
-		for (int i = 0; i < Math.min(availableItems.size(), 5); i++) {
+				Text.literal("物品 (" + availableItems.size() + "):"), itemLeft, listY, 0xAAAAFF);
+		int itemY = itemListTop;
+		int maxItems = Math.min(availableItems.size(), 5);
+		for (int i = 0; i < maxItems; i++) {
 			var def = availableItems.get(i);
 			boolean selected = selectedItemIds.contains(def.id());
 			var text = (selected ? "§a[x] " : "§c[ ] ") + def.name() + " (" + def.id() + ")";
-			context.drawTextWithShadow(this.textRenderer, Text.literal(text), centerX - 250, itemY, 0xFFFFFF);
+			context.drawTextWithShadow(this.textRenderer, Text.literal(text), itemLeft, itemY, 0xFFFFFF);
 			itemY += 11;
 		}
 
+		blockLeft = centerX + 10;
+		blockRight = centerX + 270;
+		blockListTop = listY + 12;
+		blockListBottom = blockListTop + Math.min(availableBlocks.size(), 5) * 11;
+
 		context.drawTextWithShadow(this.textRenderer,
-				Text.literal("方块 (" + availableBlocks.size() + "):"), centerX + 10, y - 12, 0xFFAAAA);
-		int blockY = y;
-		for (int i = 0; i < Math.min(availableBlocks.size(), 5); i++) {
+				Text.literal("方块 (" + availableBlocks.size() + "):"), blockLeft, listY, 0xFFAAAA);
+		int blockY = blockListTop;
+		int maxBlocks = Math.min(availableBlocks.size(), 5);
+		for (int i = 0; i < maxBlocks; i++) {
 			var def = availableBlocks.get(i);
 			boolean selected = selectedBlockIds.contains(def.id());
 			var text = (selected ? "§a[x] " : "§c[ ] ") + def.name() + " (" + def.id() + ")";
-			context.drawTextWithShadow(this.textRenderer, Text.literal(text), centerX + 10, blockY, 0xFFFFFF);
+			context.drawTextWithShadow(this.textRenderer, Text.literal(text), blockLeft, blockY, 0xFFFFFF);
 			blockY += 11;
 		}
 
-		// Render buttons
+		// P0-2: Show capability report if pending
+		if (awaitingDegradedConfirmation && pendingReport != null) {
+			int reportY = this.height - 140;
+			context.drawCenteredTextWithShadow(this.textRenderer,
+					Text.literal("§e=== 能力报告 ===").formatted(Formatting.BOLD),
+					centerX, reportY, 0xFFFF00);
+			reportY += 12;
+			context.drawCenteredTextWithShadow(this.textRenderer,
+					Text.literal("§a保留 " + pendingReport.retained().size() + " 项"),
+					centerX, reportY, 0x00FF00);
+			reportY += 11;
+			context.drawCenteredTextWithShadow(this.textRenderer,
+					Text.literal("§c丢失 " + pendingReport.lost().size() + " 项"),
+					centerX, reportY, 0xFF0000);
+			reportY += 11;
+			for (int i = 0; i < Math.min(pendingReport.lost().size(), 3); i++) {
+				context.drawCenteredTextWithShadow(this.textRenderer,
+						Text.literal("§c- " + pendingReport.lost().get(i)),
+						centerX, reportY, 0xFF6666);
+				reportY += 10;
+			}
+		}
+
+		// 3) widget tree (buttons + fields) — renderBackground inside super.render()
+		//    is gated by blurDoneThisFrame, so nothing re-blurs
 		super.render(context, mouseX, mouseY, delta);
 
-		// Render status
-		y = this.height - 60;
+		// 4) status / result text (crisp, above widgets)
+		y = this.height - 50;
 		if (exportInProgress) {
 			context.drawCenteredTextWithShadow(this.textRenderer,
 					Text.literal("§e正在导出... 请稍候"), centerX, y, 0xFFFF00);
@@ -288,13 +399,13 @@ public class WorldForgeExportScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
-		// Check if clicking on an item to toggle selection
-		int centerX = this.width / 2;
-		int y = 44 + 24 * 3 + 30; // after fields
-		int itemY = y + 12;
-		for (int i = 0; i < Math.min(availableItems.size(), 5); i++) {
-			if (mouseY >= itemY && mouseY < itemY + 11 && mouseX >= centerX - 250) {
-				var id = availableItems.get(i).id();
+		// Only handle list clicks within the bounded item/block list areas
+		// This prevents list clicks from swallowing events meant for other controls
+		if (mouseY >= itemListTop && mouseY < itemListBottom
+				&& mouseX >= itemLeft && mouseX < itemRight) {
+			int idx = (int)((mouseY - itemListTop) / 11);
+			if (idx >= 0 && idx < Math.min(availableItems.size(), 5)) {
+				var id = availableItems.get(idx).id();
 				if (selectedItemIds.contains(id)) {
 					selectedItemIds.remove(id);
 				} else {
@@ -302,12 +413,12 @@ public class WorldForgeExportScreen extends Screen {
 				}
 				return true;
 			}
-			itemY += 11;
 		}
-		int blockY = y;
-		for (int i = 0; i < Math.min(availableBlocks.size(), 5); i++) {
-			if (mouseY >= blockY && mouseY < blockY + 11 && mouseX >= centerX + 10) {
-				var id = availableBlocks.get(i).id();
+		if (mouseY >= blockListTop && mouseY < blockListBottom
+				&& mouseX >= blockLeft && mouseX < blockRight) {
+			int idx = (int)((mouseY - blockListTop) / 11);
+			if (idx >= 0 && idx < Math.min(availableBlocks.size(), 5)) {
+				var id = availableBlocks.get(idx).id();
 				if (selectedBlockIds.contains(id)) {
 					selectedBlockIds.remove(id);
 				} else {
@@ -315,13 +426,30 @@ public class WorldForgeExportScreen extends Screen {
 				}
 				return true;
 			}
-			blockY += 11;
 		}
 		return super.mouseClicked(mouseX, mouseY, button);
 	}
 
 	@Override
 	public boolean shouldCloseOnEsc() {
-		return !exportInProgress; // don't close during export
+		return !exportInProgress;
+	}
+
+	@Override
+	public void close() {
+		// P1-3: Cancel export and reclaim resources
+		if (exportExecutor != null) {
+			exportExecutor.cancel();
+		}
+		if (exportThread != null && exportThread.isAlive()) {
+			exportThread.interrupt();
+		}
+		// P1-3: No success shown after cancel
+		if (exportInProgress) {
+			result = new ModExporter.ExportResult(false, null, null, null,
+					"导出已取消", List.of());
+			exportInProgress = false;
+		}
+		super.close();
 	}
 }

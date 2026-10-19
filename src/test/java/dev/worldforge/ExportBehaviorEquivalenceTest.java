@@ -137,6 +137,77 @@ class ExportBehaviorEquivalenceTest {
 		cleanup();
 	}
 
+	@Test
+	void generatedBlockUsesWorldAwareCooldownKey(@TempDir Path tempDir) throws Exception {
+		this.tempDir = tempDir;
+		setupStore();
+
+		var behavior = new dev.worldforge.definition.BehaviorDefinition(
+				"on_use", List.of("apply_effect"), Map.<String, Object>of("effect", "speed", "duration", 200, "amplifier", 0), 200);
+		var blockDef = new BlockDefinition(
+				1, "worldforge:magic_device", "魔法装置", "", "magic_device",
+				BlockDefinition.Category.INTERACTIVE, 2.0,
+				List.of(behavior), 0, null, 0);
+		BlockRuntimeManager.create(blockDef);
+
+		var req = new ModExporter.ExportRequest(
+				"thunder_mod", "Thunder Mod", "1.0.0", tempDir,
+				List.of(), List.of("worldforge:magic_device"));
+
+		var projectDir = tempDir.resolve("thunder_mod");
+		var gen = new TemplateProjectGenerator(req, projectDir);
+		gen.generate();
+
+		var blockClass = Files.readString(projectDir.resolve(
+				"src/main/java/thunder/mod/MagicDeviceBlock.java"));
+
+		// P1-1: Cooldown key must be world-aware (not just BlockPos)
+		assertTrue(blockClass.contains("cooldownKey"),
+				"Block must use cooldownKey method for world-aware cooldown");
+		assertTrue(blockClass.contains("getRegistryKey"),
+				"Cooldown key must include world registry key to prevent cross-world contamination");
+		assertFalse(blockClass.contains("Map<BlockPos, Long> LAST_USE"),
+				"Block must NOT use raw BlockPos as cooldown key (cross-world bug)");
+
+		// P1-1: onStateReplaced must clear cooldown on block removal
+		assertTrue(blockClass.contains("onStateReplaced"),
+				"Block must override onStateReplaced to clear cooldown on removal");
+		assertTrue(blockClass.contains("LAST_USE.remove"),
+				"onStateReplaced must remove the cooldown entry");
+
+		cleanup();
+	}
+
+	@Test
+	void generatedItemCooldownUsesUuidNotPosition(@TempDir Path tempDir) throws Exception {
+		this.tempDir = tempDir;
+		setupStore();
+
+		var behavior = new dev.worldforge.definition.BehaviorDefinition(
+				"on_use", List.of("summon_lightning"), Map.of(), 100);
+		var itemDef = new ItemDefinition(1, "worldforge:thunder_sword", "雷霆之剑",
+				"", TextureSource.vanilla("minecraft:item/diamond_sword"),
+				Map.of(), List.of(behavior));
+		WorldForgeRuntimeManager.createItem(itemDef);
+
+		var req = new ModExporter.ExportRequest(
+				"thunder_mod", "Thunder Mod", "1.0.0", tempDir,
+				List.of("worldforge:thunder_sword"), List.of());
+
+		var projectDir = tempDir.resolve("thunder_mod");
+		var gen = new TemplateProjectGenerator(req, projectDir);
+		gen.generate();
+
+		var itemClass = Files.readString(projectDir.resolve(
+				"src/main/java/thunder/mod/ThunderSwordItem.java"));
+
+		// Item cooldown is per-player (UUID), not per-position
+		assertTrue(itemClass.contains("Map<UUID, Long>") || itemClass.contains("Map<java.util.UUID, Long>"),
+				"Item cooldown must use UUID key (per-player)");
+
+		cleanup();
+	}
+
 	private void setupStore() {
 		BlockRuntimeManager.attachStoreForTesting(new BlockDefinitionStore(tempDir.resolve("bs")));
 		WorldForgeRuntimeManager.attachStoreForTesting(

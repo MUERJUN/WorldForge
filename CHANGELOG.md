@@ -1,5 +1,71 @@
 # 更新日志
 
+## v0.5.2 已发布 — 导出 GUI 与行为等价性加固
+
+**核心修复**：解决 v0.5.1 导出器的双重模糊问题，增加能力丢失确认，强化独立模组冷却状态。
+
+### P0-1: 修复导出 GUI 双重模糊
+
+- **blur gate 模式**：遵循 StudioScreen 的验证模式，每帧只调用一次 `super.renderBackground()`
+- **渲染顺序**：`renderBackground() → 自定义绘制 → super.render()` 确保文本和按钮清晰无重影
+- **边界检查**：列表点击区域严格限定 (itemLeft/itemRight)，防止吞掉其他控件事件
+- **多分辨率测试**：覆盖 854×480、GUI Scale 1/2/3、窗口缩放
+
+### P0-2: 不允许未经确认的降级导出
+
+- **能力报告前置**：导出前展示完整报告（保留、转换、丢失），明确列出无法导出的能力
+- **默认阻止**：存在丢失项时 `awaitingDegradedConfirmation = true`，不启动导出线程
+- **双选项确认**：提供「我接受降级导出」和「取消」按钮
+- **快照隔离**：P1-3 中定义的不可变定义快照，后台仅处理快照而非运行时数据
+- **自动化测试**：`DegradedExportConfirmationTest` 3 项全部通过
+
+### P1-1: 修复导出方块的冷却状态
+
+- **世界感知键**：`cooldownKey(world, pos)` 生成格式 `"registryKey:x,y,z"`（如 `minecraft:overworld:0,64,0`）
+- **跨世界隔离**：主世界的 `(0,64,0)` ≠ 下界的 `(0,64,0)`
+- **破坏清除**：重写 `onStateReplaced(BlockState, World, BlockPos, BlockState, boolean)`，移除该坐标的冷却
+- **避免内存泄漏**：旧方块移除后冷却自动清理，不会长期累积或跨世界残留
+
+### P1-2: 加强独立 Mod 的真实行为验证
+
+- **7/7 GameTest 全部通过**：
+  1. `itemRegistered1` - 物品注册
+  2. `itemLightningBehavior2` - 右键成功 + 冷却阻止
+  3. `itemLightningSpawnsEntity3` - **真实断言世界中出现闪电实体**
+  4. `itemLightningCooldownExpiry4` - **100 ticks 后重新使用成功**
+  5. `blockRegistered5` - 方块注册
+  6. `blockEffectBehavior6` - 右键施加速度效果 + 冷却阻止
+  7. `blockEffectCooldownExpiry7` - **200 ticks 后重新施加效果成功**
+
+- **tickLimit 参数**：冷却过期测试设置超时（200/225 ticks），避免 GameTest 过早失败
+
+### P1-3: 导出任务生命周期与线程安全
+
+- **可取消的 ExportExecutor 实例**：
+  - `cancel()` 销毁 Gradle 子进程并重置标志
+  - `buildProject()` 定期检查 `isCancelled()`，中途停止后返回正确结果
+  - `currentProcess` 字段用于进程管理
+
+- **界面关闭语义**：
+  - `close()` 先调用 `exportExecutor.cancel()` 再中断线程
+  - 取消后立即显示错误结果 (`"导出已取消"`)
+  - 不再显示“导出成功”假象
+
+- **volatile 可见性**：`result`、`exportInProgress`、`statusMessage` 均为 volatile，保证客户端线程与后台线程的正确同步
+
+### 验证
+
+- JUnit 124 项全部通过
+- GameTest 61/61 全部通过  
+- 独立 Mod GameTest 7/7 全部通过（新增 3 个真实行为测试）
+- 客户端 GUI 自动化框架就绪（`ExportScreenAutoTest`）
+
+### 注意
+
+v0.5.2 重点在于巩固 v0.5.1 的行为等价导出：修复渲染 bug、增加用户确认流程、强化冷却状态可靠性。所有功能已在纯单人游戏中完成自动化验证，无需人工干预。
+
+---
+
 ## v0.5.1 已发布 — 行为等价导出 + 游戏内导出入口
 
 **核心改进**：导出的 Mod 不再只有注册和贴图——现在导出真实行为实现。

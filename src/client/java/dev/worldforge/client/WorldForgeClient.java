@@ -76,6 +76,9 @@ public class WorldForgeClient implements ClientModInitializer {
 		// v0.3.2: in-game automated GUI check (only active with run/wf-autotest.flag)
 		dev.worldforge.client.dev.StudioAutoTest.register();
 
+		// v0.5.2: export screen auto-test (only active with -Dworldforge.export.autotest=true)
+		dev.worldforge.client.dev.ExportScreenAutoTest.init();
+
 		WorldForge.LOGGER.info("[WorldForge] client init done (studio key = K, receivers registered)");
 	}
 }

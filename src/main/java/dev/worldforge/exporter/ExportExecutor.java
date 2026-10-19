@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Orchestrates the full export: validate → generate → build → checksum.
@@ -29,10 +30,45 @@ public final class ExportExecutor {
 	/** Build timeout in minutes. */
 	private static final long BUILD_TIMEOUT_MINUTES = 10;
 
+	/** Cancellation flag — set by cancel(), checked by the build loop. */
+	private final AtomicBoolean cancelled = new AtomicBoolean(false);
+
+	/** The current Gradle process, if running. */
+	private volatile Process currentProcess;
+
+	/**
+	 * Cancel an in-progress export. Destroys the Gradle subprocess if running.
+	 */
+	public void cancel() {
+		cancelled.set(true);
+		var proc = currentProcess;
+		if (proc != null && proc.isAlive()) {
+			proc.destroyForcibly();
+		}
+	}
+
+	/** Check if this export has been cancelled. */
+	public boolean isCancelled() {
+		return cancelled.get();
+	}
+
 	/**
 	 * Run a full export synchronously. Call from a background thread.
+	 * Uses the instance's cancellation flag.
+	 */
+	public ModExporter.ExportResult exportInstance(ModExporter.ExportRequest req) {
+		return doExport(req);
+	}
+
+	/**
+	 * Run a full export synchronously. Call from a background thread.
+	 * Static convenience method — creates a temporary instance.
 	 */
 	public static ModExporter.ExportResult export(ModExporter.ExportRequest req) {
+		return new ExportExecutor().doExport(req);
+	}
+
+	private ModExporter.ExportResult doExport(ModExporter.ExportRequest req) {
 		// 1) validate
 		var errors = ModExporter.validate(req);
 		if (!errors.isEmpty()) {
@@ -71,7 +107,15 @@ public final class ExportExecutor {
 
 		// 5) build (gradle) with timeout
 		try {
+			if (cancelled.get()) {
+				return new ModExporter.ExportResult(false, projectDir, null, null,
+						"导出已取消", warnings);
+			}
 			var jarPath = buildProject(projectDir, req);
+			if (cancelled.get()) {
+				return new ModExporter.ExportResult(false, projectDir, null, null,
+						"导出已取消", warnings);
+			}
 			if (jarPath == null) {
 				return new ModExporter.ExportResult(false, projectDir, null, null,
 						"Gradle 构建未产生 JAR 文件。源码工程位于 " + projectDir, warnings);
@@ -122,7 +166,7 @@ public final class ExportExecutor {
 	 * Build the project using the Gradle wrapper. Returns the JAR path or null.
 	 * Includes timeout to prevent hanging.
 	 */
-	private static Path buildProject(Path projectDir, ModExporter.ExportRequest req)
+	private Path buildProject(Path projectDir, ModExporter.ExportRequest req)
 			throws Exception {
 		// Use the Gradle wrapper if present, otherwise system gradle
 		var gradlew = projectDir.resolve("gradlew").toAbsolutePath();
@@ -145,6 +189,7 @@ public final class ExportExecutor {
 		pb.environment().remove("FABRIC_API_KEY");
 
 		var proc = pb.start();
+		currentProcess = proc;
 		var output = new StringBuilder();
 		try (var reader = proc.inputReader()) {
 			String line;
@@ -194,5 +239,5 @@ public final class ExportExecutor {
 		return HexFormat.of().formatHex(md.digest());
 	}
 
-	private ExportExecutor() {}
+	public ExportExecutor() {}
 }

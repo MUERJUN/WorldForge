@@ -136,6 +136,54 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\t}\n");
 				sb.append("\t\tctx.complete();\n");
 				sb.append("\t}\n\n");
+
+				// P1-2: Test that lightning entity is actually spawned in the world
+				testNum++;
+				sb.append("\t@GameTest(templateName = \"fabric-gametest-api-v1:empty\", batchId = \"exported\")\n");
+				sb.append("\tpublic static void itemLightningSpawnsEntity").append(testNum)
+						.append("(TestContext ctx) {\n");
+				sb.append("\t\tServerWorld world = ctx.getWorld();\n");
+				sb.append("\t\tServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();\n");
+				sb.append("\t\tvar item = Registries.ITEM.get(Identifier.of(\"")
+						.append(req.modId()).append("\", \"").append(nativeId).append("\"));\n");
+				sb.append("\t\tItemStack stack = new ItemStack(item);\n");
+				sb.append("\t\tplayer.setStackInHand(Hand.MAIN_HAND, stack);\n");
+				// Count lightning before
+				sb.append("\t\tint before = countLightning(world);\n");
+				sb.append("\t\titem.use(world, player, Hand.MAIN_HAND);\n");
+				// Wait for entity to be processed
+				sb.append("\t\tctx.waitAndRun(3, () -> {\n");
+				sb.append("\t\t\tint after = countLightning(world);\n");
+				sb.append("\t\t\tif (after <= before) {\n");
+				sb.append("\t\t\t\tthrow new AssertionError(\"No lightning entity spawned — behavior did not execute. before=\" + before + \" after=\" + after);\n");
+				sb.append("\t\t\t}\n");
+				sb.append("\t\t\tctx.complete();\n");
+				sb.append("\t\t});\n");
+				sb.append("\t}\n\n");
+
+				// P1-2: Test cooldown expiry — after cooldown, use succeeds again
+				testNum++;
+				int waitTicks = cooldown + 5;
+				int expiryTimeout = Math.max(200, waitTicks + 20);
+				sb.append("\t@GameTest(templateName = \"fabric-gametest-api-v1:empty\", batchId = \"exported\", tickLimit = ").append(expiryTimeout).append(")\n");
+				sb.append("\tpublic static void itemLightningCooldownExpiry").append(testNum)
+						.append("(TestContext ctx) {\n");
+				sb.append("\t\tServerWorld world = ctx.getWorld();\n");
+				sb.append("\t\tServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();\n");
+				sb.append("\t\tvar item = Registries.ITEM.get(Identifier.of(\"")
+						.append(req.modId()).append("\", \"").append(nativeId).append("\"));\n");
+				sb.append("\t\tItemStack stack = new ItemStack(item);\n");
+				sb.append("\t\tplayer.setStackInHand(Hand.MAIN_HAND, stack);\n");
+				sb.append("\t\titem.use(world, player, Hand.MAIN_HAND);\n");
+				// Wait for cooldown to expire + buffer
+				sb.append("\t\tctx.waitAndRun(").append(waitTicks).append(", () -> {\n");
+				sb.append("\t\t\tvar result = item.use(world, player, Hand.MAIN_HAND);\n");
+				sb.append("\t\t\tif (result.getResult() != ActionResult.SUCCESS) {\n");
+				sb.append("\t\t\t\tthrow new AssertionError(\"Cooldown expiry failed: use should succeed after ").append(cooldown).append(" ticks\");\n");
+				sb.append("\t\t\t}\n");
+				sb.append("\t\t\tctx.complete();\n");
+				sb.append("\t\t});\n");
+				sb.append("\t}\n\n");
 			}
 		}
 		for (String id : req.blockIds()) {
@@ -204,9 +252,54 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\t}\n");
 				sb.append("\t\tctx.complete();\n");
 				sb.append("\t}\n\n");
+
+				// P1-2: Test cooldown expiry — after cooldown, block use succeeds again
+				int blockCooldown = def.behaviors().stream()
+						.filter(b -> b.actions().contains("apply_effect"))
+						.mapToInt(dev.worldforge.definition.BehaviorDefinition::cooldownTicks)
+						.max().orElse(0);
+				testNum++;
+				int blockWaitTicks = blockCooldown + 5;
+				int blockExpiryTimeout = Math.max(200, blockWaitTicks + 20);
+				sb.append("\t@GameTest(templateName = \"fabric-gametest-api-v1:empty\", batchId = \"exported\", tickLimit = ").append(blockExpiryTimeout).append(")\n");
+				sb.append("\tpublic static void blockEffectCooldownExpiry").append(testNum)
+						.append("(TestContext ctx) {\n");
+				sb.append("\t\tServerWorld world = ctx.getWorld();\n");
+				sb.append("\t\tServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();\n");
+				sb.append("\t\tvar block = Registries.BLOCK.get(Identifier.of(\"")
+						.append(req.modId()).append("\", \"").append(nativeId).append("\"));\n");
+				sb.append("\t\tBlockPos pos = new BlockPos(0, 1, 0);\n");
+				sb.append("\t\tvar state = block.getDefaultState();\n");
+				sb.append("\t\tworld.setBlockState(pos, state);\n");
+				sb.append("\t\tvar hit = new BlockHitResult(new Vec3d(0.5, 1.0, 0.5), Direction.NORTH, pos, false);\n");
+				sb.append("\t\tvar customBlock = (").append(blockClassName).append(") block;\n");
+				sb.append("\t\tcustomBlock.onUse(state, world, pos, player, hit);\n");
+				sb.append("\t\tctx.waitAndRun(").append(blockWaitTicks).append(", () -> {\n");
+				sb.append("\t\t\tvar result = customBlock.onUse(state, world, pos, player, hit);\n");
+				sb.append("\t\t\tif (result != ActionResult.SUCCESS) {\n");
+				sb.append("\t\t\t\tthrow new AssertionError(\"Cooldown expiry failed: block use should succeed after ").append(blockCooldown).append(" ticks\");\n");
+				sb.append("\t\t\t}\n");
+				sb.append("\t\t\tvar effect = Registries.STATUS_EFFECT.getEntry(Identifier.of(\"minecraft:")
+						.append(effectName).append("\")).orElse(null);\n");
+				sb.append("\t\t\tif (effect == null || !player.hasStatusEffect(effect)) {\n");
+				sb.append("\t\t\t\tthrow new AssertionError(\"Effect not re-applied after cooldown expiry\");\n");
+				sb.append("\t\t\t}\n");
+				sb.append("\t\t\tctx.complete();\n");
+				sb.append("\t\t});\n");
+				sb.append("\t}\n\n");
 			}
 		}
 		sb.append("}\n");
+
+		// P1-2: Helper method to count lightning entities
+		sb.insert(sb.length() - 2, "\tprivate static int countLightning(ServerWorld world) {\n"
+				+ "\t\tint count = 0;\n"
+				+ "\t\tfor (var e : world.iterateEntities()) {\n"
+				+ "\t\t\tif (e.getType() == EntityType.LIGHTNING_BOLT) count++;\n"
+				+ "\t\t}\n"
+				+ "\t\treturn count;\n"
+				+ "\t}\n\n");
+
 		Files.writeString(src.resolve("ExportedModTest.java"), sb.toString());
 
 		// Register the test entrypoint in fabric.mod.json
@@ -671,6 +764,8 @@ public final class TemplateProjectGenerator {
 		sb.append("import net.minecraft.block.Block;\n");
 		sb.append("import net.minecraft.block.BlockState;\n");
 		sb.append("import net.minecraft.entity.player.PlayerEntity;\n");
+		sb.append("import net.minecraft.registry.RegistryKey;\n");
+		sb.append("import net.minecraft.registry.RegistryKeys;\n");
 		sb.append("import net.minecraft.server.world.ServerWorld;\n");
 		sb.append("import net.minecraft.util.ActionResult;\n");
 		sb.append("import net.minecraft.util.hit.BlockHitResult;\n");
@@ -681,15 +776,29 @@ public final class TemplateProjectGenerator {
 		sb.append("/**\n * Custom block with exported behaviors for ").append(escapeJava(def.name())).append(".\n */\n");
 		sb.append("public final class ").append(className).append(" extends Block {\n\n");
 
-		// Cooldown tracking: per-position last use tick
+		// P1-1: Cooldown tracking — world-aware key prevents cross-world contamination
+		// Key format: "worldKey:x,y,z" so overworld(0,1,0) ≠ nether(0,1,0)
 		int cooldownTicks = def.behaviors().stream()
 				.mapToInt(dev.worldforge.definition.BehaviorDefinition::cooldownTicks)
 				.max().orElse(0);
 		sb.append("\tprivate static final int COOLDOWN_TICKS = ").append(cooldownTicks).append(";\n");
-		sb.append("\tprivate static final Map<BlockPos, Long> LAST_USE = new HashMap<>();\n\n");
+		sb.append("\tprivate static final Map<String, Long> LAST_USE = new HashMap<>();\n\n");
+		sb.append("\tprivate static String cooldownKey(World world, BlockPos pos) {\n");
+		sb.append("\t\treturn world.getRegistryKey().getValue() + \":\" + pos.getX() + \",\" + pos.getY() + \",\" + pos.getZ();\n");
+		sb.append("\t}\n\n");
 
 		sb.append("\tpublic ").append(className).append("(Settings settings) {\n");
 		sb.append("\t\tsuper(settings);\n");
+		sb.append("\t}\n\n");
+
+		// P1-1: Clear cooldown when block is removed — prevents stale inheritance
+		sb.append("\t@Override\n");
+		sb.append("\tpublic void onStateReplaced(BlockState state, World world, BlockPos pos,\n");
+		sb.append("\t\t\tBlockState newState, boolean moved) {\n");
+		sb.append("\t\tif (!state.isOf(newState.getBlock())) {\n");
+		sb.append("\t\t\tLAST_USE.remove(cooldownKey(world, pos));\n");
+		sb.append("\t\t}\n");
+		sb.append("\t\tsuper.onStateReplaced(state, world, pos, newState, moved);\n");
 		sb.append("\t}\n\n");
 
 		// Override onUse() — right click on block (public for testability)
@@ -699,7 +808,8 @@ public final class TemplateProjectGenerator {
 		sb.append("\t\tif (world.isClient()) return ActionResult.PASS;\n");
 		sb.append("\t\tvar sw = (ServerWorld) world;\n");
 		sb.append("\t\tlong now = sw.getTime();\n");
-		sb.append("\t\tvar last = LAST_USE.get(pos);\n");
+		sb.append("\t\tvar key = cooldownKey(world, pos);\n");
+		sb.append("\t\tvar last = LAST_USE.get(key);\n");
 		sb.append("\t\tif (last != null && COOLDOWN_TICKS > 0 && now - last < COOLDOWN_TICKS) {\n");
 		sb.append("\t\t\treturn ActionResult.PASS;\n");
 		sb.append("\t\t}\n");
@@ -711,7 +821,7 @@ public final class TemplateProjectGenerator {
 			}
 		}
 
-		sb.append("\t\tLAST_USE.put(pos, now);\n");
+		sb.append("\t\tLAST_USE.put(key, now);\n");
 		sb.append("\t\treturn ActionResult.SUCCESS;\n");
 		sb.append("\t}\n");
 
