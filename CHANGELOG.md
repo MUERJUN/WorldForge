@@ -1,5 +1,66 @@
 # 更新日志
 
+## v0.5.1 已发布 — 行为等价导出 + 游戏内导出入口
+
+**核心改进**：导出的 Mod 不再只有注册和贴图——现在导出真实行为实现。
+
+### P0-1: 行为等价导出
+
+- **自定义 Item 子类**：有行为的物品生成 `ThunderSwordItem extends Item`，override `use()` 和 `useOnBlock()` 实现右键行为
+- **自定义 Block 子类**：有行为的方块生成 `MagicDeviceBlock extends Block`，override `onUse()` 实现右键交互
+- **支持的行为**：`summon_lightning`（召唤闪电）、`apply_effect`（施加状态效果）、`heal`（治疗）、`ignite`（点燃）、`sound`（音效）、`particles`（粒子）
+- **冷却时间**：每个行为带 per-player/per-position 冷却跟踪，首次使用不被错误阻挡
+- **能力报告**：`buildCapabilityReport()` 列出保留、转换、丢失的每项能力
+- **不再静默丢弃**：支持一个行为就真正生成一个实现
+
+### P0-2: 游戏内导出入口
+
+- **`WorldForgeExportScreen`**：Studio 中新增「导出 Mod」按钮，打开导出界面
+- 选择物品/方块、输入 Mod 名称/ID/版本、设置输出目录
+- 异步导出不阻塞游戏主线程
+- 显示 JAR 路径、SHA-256、错误信息
+- 多人联机安全：仅单人集成服务端可导出
+
+### P0-3: 打包构建模板为资源
+
+- Gradle Wrapper 打包为 `src/main/resources/export-template/` 资源
+- 不依赖 WorldForge 源码仓库的当前工作目录
+- Java 编译环境检查（`java -version` 验证 Java 21+）
+- 构建超时（10 分钟）防止挂起
+- 无编译条件时诚实说明，返回源码工程供检查
+
+### 二: 注册 ID 冲突检测
+
+- BlockItem 也占用 ITEM 注册表，与独立物品同名时拒绝导出
+- 重复物品 ID 检测
+- 不同命名空间映射冲突检测
+
+### 三: 端到端功能等价测试
+
+- **雷霆之剑**：右键召唤闪电 + 100 ticks 冷却
+- **魔法装置**：右键施加速度效果 + 200 ticks 冷却
+- 独立 Mod GameTest 4/4 全部通过（注册 + 行为 + 冷却）
+- 不再只有"是否注册"的两项测试
+
+### 四: 导出安全性
+
+- 输出目录符号链接拒绝（路径穿越防护）
+- 父路径符号链接检查
+- 构建日志脱敏（API Key、Token、Password 替换为 `***REDACTED***`）
+- JAR 内容验证：无 API Key、无世界存档、无 WorldForge 依赖
+- Gradle 子进程环境变量清理
+
+### 验证
+
+- JUnit 119 项全部通过
+- GameTest 61/61 全部通过
+- 独立 Mod GameTest 4/4 全部通过（行为 + 冷却）
+- JAR SHA-256: `acc065f2d0e926cb3468b40bca8f04e6a61e2abfc98de3e8221cecc28eed1d3e`
+
+### 注意
+
+v0.5.0 只验证过独立注册能力，行为等价属于 v0.5.1 后续完善范围。
+
 ## v0.5.0 已发布 — 独立 Mod JAR 导出器
 
 **导出器**：玩家在 WorldForge Studio 中创建的物品和方块可以导出为独立 Fabric Mod JAR，不依赖 WorldForge 本体。

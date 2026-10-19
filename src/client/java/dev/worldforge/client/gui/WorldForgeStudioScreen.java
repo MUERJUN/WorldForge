@@ -240,6 +240,14 @@ public class WorldForgeStudioScreen extends Screen {
 		refreshDraftWidgets();
 		applyMode();
 		sendRequest("list", "");
+
+		// v0.5.1: Export Mod button
+		addDrawableChild(ButtonWidget.builder(
+				Text.literal("导出 Mod"),
+				b -> client.setScreen(new WorldForgeExportScreen()))
+				.position(x0 + panelW - 90, y0 + 2)
+				.size(80, 16)
+				.build());
 	}
 
 	private boolean programmatic = false;

@@ -67,13 +67,33 @@ public final class ModExporter {
 		}
 		if (req.outputDir() == null) {
 			errors.add("输出目录不能为空");
-		} else if (Files.exists(req.outputDir()) && Files.isDirectory(req.outputDir())) {
-			try (var stream = Files.list(req.outputDir())) {
-				if (stream.findAny().isPresent()) {
-					errors.add("输出目录必须为空（避免覆盖已有文件）");
+		} else {
+			// Reject symbolic links to prevent path traversal
+			try {
+				var resolved = req.outputDir().toAbsolutePath().normalize();
+				if (Files.isSymbolicLink(resolved)) {
+					errors.add("输出目录不能是符号链接");
+				}
+				// Check parent directories for symlinks too
+				var parent = resolved.getParent();
+				while (parent != null && !parent.equals(parent.getRoot())) {
+					if (Files.isSymbolicLink(parent)) {
+						errors.add("输出目录的父路径包含符号链接: " + parent);
+						break;
+					}
+					parent = parent.getParent();
 				}
 			} catch (Exception e) {
-				errors.add("无法检查输出目录: " + e.getMessage());
+				errors.add("无法检查输出目录路径: " + e.getMessage());
+			}
+			if (Files.exists(req.outputDir()) && Files.isDirectory(req.outputDir())) {
+				try (var stream = Files.list(req.outputDir())) {
+					if (stream.findAny().isPresent()) {
+						errors.add("输出目录必须为空（避免覆盖已有文件）");
+					}
+				} catch (Exception e) {
+					errors.add("无法检查输出目录: " + e.getMessage());
+				}
 			}
 		}
 		if (req.itemIds() == null || req.blockIds() == null) {
@@ -101,7 +121,39 @@ public final class ModExporter {
 				errors.add("方块定义不存在: " + id);
 			}
 		}
+		// Check for registration ID conflicts
+		// BlockItem also occupies the ITEM registry, so a standalone item
+		// and a block item with the same native ID would conflict.
+		var itemNativeIds = new java.util.HashSet<String>();
+		for (String id : req.itemIds()) {
+			if (isValidWorldForgeId(id) && WorldForgeRuntimeManager.get(id) != null) {
+				var nativeId = nativeItemId(id);
+				if (!itemNativeIds.add(nativeId)) {
+					errors.add("物品 ID 冲突: " + nativeId + " 被多个物品使用");
+				}
+			}
+		}
+		for (String id : req.blockIds()) {
+			if (isValidWorldForgeId(id) && BlockRuntimeManager.get(id) != null) {
+				var nativeId = nativeBlockId(id);
+				// Block occupies BLOCK registry
+				// BlockItem occupies ITEM registry with the same native ID
+				if (!itemNativeIds.add(nativeId)) {
+					errors.add("注册 ID 冲突: 方块物品 " + nativeId
+							+ " 与某个独立物品产生相同的 Item 注册 ID");
+				}
+			}
+		}
 		return errors;
+	}
+
+	/** Extract native ID from WorldForge ID: "worldforge:my_sword" -> "my_sword" */
+	static String nativeItemId(String worldForgeId) {
+		return worldForgeId.replace("worldforge:", "").replace(":", "_");
+	}
+
+	static String nativeBlockId(String worldForgeId) {
+		return nativeItemId(worldForgeId);
 	}
 
 	/**
@@ -153,9 +205,62 @@ public final class ModExporter {
 	private static boolean isSupportedBlockAction(String action) {
 		return switch (action) {
 			case "apply_effect", "heal", "experience", "ignite",
-				 "give_item", "sound", "particles" -> true;
+				 "give_item", "sound", "particles", "summon_lightning" -> true;
 			default -> false;
 		};
+	}
+
+	/** Capability report: what is retained, converted, and lost in the export. */
+	public record CapabilityReport(
+			List<String> retained,   // capabilities fully implemented in exported mod
+			List<String> converted,   // capabilities with a different but equivalent implementation
+			List<String> lost         // capabilities that cannot be exported
+	) {
+		public static CapabilityReport empty() {
+			return new CapabilityReport(List.of(), List.of(), List.of());
+		}
+	}
+
+	/**
+	 * Build a capability report for the export request.
+	 * Lists every behavior action and whether it is retained, converted, or lost.
+	 */
+	public static CapabilityReport buildCapabilityReport(ExportRequest req) {
+		List<String> retained = new java.util.ArrayList<>();
+		List<String> converted = new java.util.ArrayList<>();
+		List<String> lost = new java.util.ArrayList<>();
+		for (String id : req.itemIds()) {
+			ItemDefinition def = WorldForgeRuntimeManager.get(id);
+			if (def == null) continue;
+			for (var b : def.behaviors()) {
+				for (String action : b.actions()) {
+					String desc = "item " + id + ": " + action + " (trigger=" + b.trigger() + ")";
+					if (isSupportedItemAction(action)) {
+						retained.add(desc);
+					} else {
+						lost.add(desc);
+					}
+				}
+			}
+		}
+		for (String id : req.blockIds()) {
+			BlockDefinition def = BlockRuntimeManager.get(id);
+			if (def == null) continue;
+			for (var b : def.behaviors()) {
+				for (String action : b.actions()) {
+					String desc = "block " + id + ": " + action + " (trigger=" + b.trigger() + ")";
+					if (isSupportedBlockAction(action)) {
+						retained.add(desc);
+					} else {
+						lost.add(desc);
+					}
+				}
+			}
+		}
+		return new CapabilityReport(
+				java.util.List.copyOf(retained),
+				java.util.List.copyOf(converted),
+				java.util.List.copyOf(lost));
 	}
 
 	private ModExporter() {}
