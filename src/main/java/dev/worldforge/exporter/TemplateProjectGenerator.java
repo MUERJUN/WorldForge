@@ -154,14 +154,26 @@ public final class TemplateProjectGenerator {
 						.append(req.modId()).append("\", \"").append(nativeId).append("\"));\n");
 				sb.append("\t\tItemStack stack = new ItemStack(item);\n");
 				sb.append("\t\tplayer.setStackInHand(Hand.MAIN_HAND, stack);\n");
-				// Count lightning before
-				sb.append("\t\tint before = countLightning(world);\n");
+				// v0.5.4: count only NEW bolts — earlier tests in the same batch
+				// leave bolts alive, and one may despawn mid-wait, so raw counts
+				// flake. Snapshot pre-existing UUIDs; assert a new one appears.
+				sb.append("\t\tjava.util.Set<java.util.UUID> existingBoltIds = new java.util.HashSet<>();\n");
+				sb.append("\t\tfor (var e : world.iterateEntities()) {\n");
+				sb.append("\t\t\tif (e.getType() == EntityType.LIGHTNING_BOLT) existingBoltIds.add(e.getUuid());\n");
+				sb.append("\t\t}\n");
+				sb.append("\t\tint before = existingBoltIds.size();\n");
 				sb.append("\t\titem.use(world, player, Hand.MAIN_HAND);\n");
 				// Wait for entity to be processed
 				sb.append("\t\tctx.waitAndRun(3, () -> {\n");
-				sb.append("\t\t\tint after = countLightning(world);\n");
-				sb.append("\t\t\tif (after <= before) {\n");
-				sb.append("\t\t\t\tthrow new AssertionError(\"No lightning entity spawned — behavior did not execute. before=\" + before + \" after=\" + after);\n");
+				sb.append("\t\t\tboolean newBolt = false;\n");
+				sb.append("\t\t\tfor (var e : world.iterateEntities()) {\n");
+				sb.append("\t\t\t\tif (e.getType() == EntityType.LIGHTNING_BOLT\n");
+				sb.append("\t\t\t\t\t\t&& !existingBoltIds.contains(e.getUuid())) {\n");
+				sb.append("\t\t\t\t\tnewBolt = true;\n");
+				sb.append("\t\t\t\t}\n");
+				sb.append("\t\t\t}\n");
+				sb.append("\t\t\tif (!newBolt) {\n");
+				sb.append("\t\t\t\tthrow new AssertionError(\"No NEW lightning entity spawned — behavior did not execute. before=\" + before);\n");
 				sb.append("\t\t\t}\n");
 				sb.append("\t\t\tctx.complete();\n");
 				sb.append("\t\t});\n");

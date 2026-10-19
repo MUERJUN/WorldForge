@@ -51,51 +51,13 @@ public final class ModExporter {
 	/**
 	 * Validate an export request before doing any work.
 	 * Returns a list of error messages (empty = valid).
+	 *
+	 * <p>NOTE: this variant resolves definitions through the live runtime
+	 * managers — only safe on the game thread. Background export threads must
+	 * use {@link #validatePlanShape(ExportPlan)} which reads frozen plan data.</p>
 	 */
 	public static List<String> validate(ExportRequest req) {
-		List<String> errors = new ArrayList<>();
-		if (req.modId() == null || !req.modId().matches("[a-z][a-z0-9_]{1,31}")) {
-			errors.add("Mod ID 必须以小写字母开头，仅含小写字母/数字/下划线，2-32 字符");
-		}
-		if (req.modName() == null || req.modName().isBlank() || req.modName().length() > 64) {
-			errors.add("Mod 名称不能为空且不超过 64 字符");
-		} else if (req.modName().chars().anyMatch(c -> c < 0x20 && c != '\t' || c == ';' || c == '|' || c == '`' || c == '$' || c == '\n' || c == '\r')) {
-			errors.add("Mod 名称包含不允许的特殊字符");
-		}
-		if (req.modVersion() == null || !req.modVersion().matches("\\d+\\.\\d+\\.\\d+")) {
-			errors.add("版本号格式必须为 X.Y.Z");
-		}
-		if (req.outputDir() == null) {
-			errors.add("输出目录不能为空");
-		} else {
-			// Reject symbolic links to prevent path traversal
-			try {
-				var resolved = req.outputDir().toAbsolutePath().normalize();
-				if (Files.isSymbolicLink(resolved)) {
-					errors.add("输出目录不能是符号链接");
-				}
-				// Check parent directories for symlinks too
-				var parent = resolved.getParent();
-				while (parent != null && !parent.equals(parent.getRoot())) {
-					if (Files.isSymbolicLink(parent)) {
-						errors.add("输出目录的父路径包含符号链接: " + parent);
-						break;
-					}
-					parent = parent.getParent();
-				}
-			} catch (Exception e) {
-				errors.add("无法检查输出目录路径: " + e.getMessage());
-			}
-			if (Files.exists(req.outputDir()) && Files.isDirectory(req.outputDir())) {
-				try (var stream = Files.list(req.outputDir())) {
-					if (stream.findAny().isPresent()) {
-						errors.add("输出目录必须为空（避免覆盖已有文件）");
-					}
-				} catch (Exception e) {
-					errors.add("无法检查输出目录: " + e.getMessage());
-				}
-			}
-		}
+		List<String> errors = validateMetadata(req.modId(), req.modName(), req.modVersion(), req.outputDir());
 		if (req.itemIds() == null || req.blockIds() == null) {
 			errors.add("物品和方块 ID 列表不能为 null");
 			return errors; // can't continue validation with null lists
@@ -141,6 +103,55 @@ public final class ModExporter {
 				if (!itemNativeIds.add(nativeId)) {
 					errors.add("注册 ID 冲突: 方块物品 " + nativeId
 							+ " 与某个独立物品产生相同的 Item 注册 ID");
+				}
+			}
+		}
+		return errors;
+	}
+
+	/** Pure metadata/output-dir checks — no runtime lookups, thread-safe. */
+	private static List<String> validateMetadata(String modId, String modName,
+			String modVersion, Path outputDir) {
+		List<String> errors = new ArrayList<>();
+		if (modId == null || !modId.matches("[a-z][a-z0-9_]{1,31}")) {
+			errors.add("Mod ID 必须以小写字母开头，仅含小写字母/数字/下划线，2-32 字符");
+		}
+		if (modName == null || modName.isBlank() || modName.length() > 64) {
+			errors.add("Mod 名称不能为空且不超过 64 字符");
+		} else if (modName.chars().anyMatch(c -> c < 0x20 && c != '\t' || c == ';' || c == '|' || c == '`' || c == '$' || c == '\n' || c == '\r')) {
+			errors.add("Mod 名称包含不允许的特殊字符");
+		}
+		if (modVersion == null || !modVersion.matches("\\d+\\.\\d+\\.\\d+")) {
+			errors.add("版本号格式必须为 X.Y.Z");
+		}
+		if (outputDir == null) {
+			errors.add("输出目录不能为空");
+		} else {
+			// Reject symbolic links to prevent path traversal
+			try {
+				var resolved = outputDir.toAbsolutePath().normalize();
+				if (Files.isSymbolicLink(resolved)) {
+					errors.add("输出目录不能是符号链接");
+				}
+				// Check parent directories for symlinks too
+				var parent = resolved.getParent();
+				while (parent != null && !parent.equals(parent.getRoot())) {
+					if (Files.isSymbolicLink(parent)) {
+						errors.add("输出目录的父路径包含符号链接: " + parent);
+						break;
+					}
+					parent = parent.getParent();
+				}
+			} catch (Exception e) {
+				errors.add("无法检查输出目录路径: " + e.getMessage());
+			}
+			if (Files.exists(outputDir) && Files.isDirectory(outputDir)) {
+				try (var stream = Files.list(outputDir)) {
+					if (stream.findAny().isPresent()) {
+						errors.add("输出目录必须为空（避免覆盖已有文件）");
+					}
+				} catch (Exception e) {
+					errors.add("无法检查输出目录: " + e.getMessage());
 				}
 			}
 		}
@@ -276,11 +287,80 @@ public final class ModExporter {
 	}
 
 	/**
-	 * v0.5.3 P0-1: Validate a plan's shape (metadata, output dir) without
-	 * querying runtime managers — safe on any thread.
+	 * v0.5.4 P0: Validate a plan purely from its FROZEN data — metadata,
+	 * output dir, and registration ID conflicts computed from the plan's own
+	 * deep-copied definitions. Never queries runtime managers; safe on any
+	 * thread and immune to live definition edits/deletes/world switches.
 	 */
 	public static List<String> validatePlanShape(ExportPlan plan) {
-		return validate(toRequest(plan));
+		var errors = validateMetadata(plan.modId(), plan.modName(), plan.version(),
+				plan.outputDir() == null ? null : java.nio.file.Path.of(plan.outputDir()));
+		if (plan.items() == null || plan.blocks() == null) {
+			errors.add("方案缺少物品或方块定义");
+			return errors;
+		}
+		// Definitions in a plan exist by construction (create() rejected
+		// missing ones), so only format + conflict checks remain.
+		var usedNativeIds = new java.util.HashSet<String>();
+		for (var def : plan.items()) {
+			if (def == null || !isValidWorldForgeId(def.id())) {
+				errors.add("方案包含无效物品定义");
+				continue;
+			}
+			var nativeId = nativeItemId(def.id());
+			if (!usedNativeIds.add(nativeId)) {
+				errors.add("物品 ID 冲突: " + nativeId + " 被多个物品使用");
+			}
+		}
+		for (var def : plan.blocks()) {
+			if (def == null || !isValidWorldForgeId(def.id())) {
+				errors.add("方案包含无效方块定义");
+				continue;
+			}
+			var nativeId = nativeBlockId(def.id());
+			// Block occupies BLOCK registry; its BlockItem occupies ITEM
+			if (!usedNativeIds.add(nativeId)) {
+				errors.add("注册 ID 冲突: 方块物品 " + nativeId
+						+ " 与某个独立物品产生相同的 Item 注册 ID");
+			}
+		}
+		return errors;
+	}
+
+	/**
+	 * v0.5.4 P0: Capability report computed from the given (frozen) definitions
+	 * — no runtime lookups. Used by ExportPlan.create so the report the user
+	 * confirms is derived from exactly the snapshot that will be exported.
+	 */
+	public static CapabilityReport capabilityReportOf(List<ItemDefinition> items,
+			List<BlockDefinition> blocks) {
+		List<String> retained = new java.util.ArrayList<>();
+		List<String> converted = new java.util.ArrayList<>();
+		List<String> lost = new java.util.ArrayList<>();
+		for (var def : items) {
+			if (def == null) continue;
+			for (var b : def.behaviors()) {
+				for (String action : b.actions()) {
+					String desc = "item " + def.id() + ": " + action + " (trigger=" + b.trigger() + ")";
+					if (isSupportedItemAction(action)) retained.add(desc);
+					else lost.add(desc);
+				}
+			}
+		}
+		for (var def : blocks) {
+			if (def == null) continue;
+			for (var b : def.behaviors()) {
+				for (String action : b.actions()) {
+					String desc = "block " + def.id() + ": " + action + " (trigger=" + b.trigger() + ")";
+					if (isSupportedBlockAction(action)) retained.add(desc);
+					else lost.add(desc);
+				}
+			}
+		}
+		return new CapabilityReport(
+				java.util.List.copyOf(retained),
+				java.util.List.copyOf(converted),
+				java.util.List.copyOf(lost));
 	}
 
 	/** The plan's resolved output directory. */

@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *       artifact can look successful.</li>
  * </ul>
  */
-public final class ExportExecutor {
+public class ExportExecutor {
 
 	/** Build timeout in minutes. */
 	static final long BUILD_TIMEOUT_MINUTES = 10;
@@ -131,7 +131,12 @@ public final class ExportExecutor {
 			return finish(TerminalState.CANCELLED, false, projectDir, null, "导出已取消", warnings);
 		}
 
-		// 3) build with async log reader + timeout-from-start + cancellation
+		// 3) build with async log reader + timeout-from-start + cancellation.
+		// Terminal-state rules (v0.5.4): user cancel → CANCELLED (never FAILED);
+		// normal failure → FAILED; timeout → TIMEOUT; completion → OK. The first
+		// terminal state wins (compareAndSet in finish()); a cancel racing a
+		// successful build loses to the committed result once the pre-hash
+		// checkpoint has passed — the artifact exists, so the export is OK.
 		try {
 			var jarPath = buildProject(projectDir);
 			if (cancelled.get()) {
@@ -144,8 +149,14 @@ public final class ExportExecutor {
 				return finish(TerminalState.FAILED, false, projectDir, null,
 						"Gradle 构建未产生 JAR 文件。源码工程位于 " + projectDir, warnings);
 			}
+			// pre-hash checkpoint: past this point the build result is committed;
+			// a cancel() during SHA-256 cannot retroactively discard the artifact
 			var sha = sha256(jarPath);
 			return finish(TerminalState.OK, true, projectDir, jarPath, null, warnings, sha);
+		} catch (BuildCancelledException e) {
+			deleteProducedJars(projectDir);
+			return finish(TerminalState.CANCELLED, false, projectDir, null,
+					"导出已取消（构建中断，产物已清理）", warnings);
 		} catch (BuildTimeoutException e) {
 			deleteProducedJars(projectDir);
 			return finish(TerminalState.TIMEOUT, false, projectDir, null,
@@ -230,21 +241,27 @@ public final class ExportExecutor {
 	}
 
 	/**
+	 * The subprocess command that builds the project. Protected so tests can
+	 * substitute a fake fast/slow build script (no real Gradle needed).
+	 */
+	protected List<String> buildCommand(Path projectDir) {
+		var gradlew = projectDir.resolve("gradlew").toAbsolutePath();
+		var gradleBat = projectDir.resolve("gradlew.bat").toAbsolutePath();
+		if (Files.exists(gradleBat)) {
+			return List.of(gradleBat.toString(), "build", "--console=plain");
+		} else if (Files.exists(gradlew)) {
+			return List.of(gradlew.toString(), "build", "--console=plain");
+		}
+		return List.of("gradle", "build", "--console=plain");
+	}
+
+	/**
 	 * Build the project using the Gradle wrapper.
 	 * Log output is read on a dedicated daemon thread so the bounded
 	 * {@code waitFor(timeout)} can never be starved by a full pipe.
 	 */
 	private Path buildProject(Path projectDir) throws Exception {
-		var gradlew = projectDir.resolve("gradlew").toAbsolutePath();
-		var gradleBat = projectDir.resolve("gradlew.bat").toAbsolutePath();
-		List<String> gradleCmd;
-		if (Files.exists(gradleBat)) {
-			gradleCmd = List.of(gradleBat.toString(), "build", "--console=plain");
-		} else if (Files.exists(gradlew)) {
-			gradleCmd = List.of(gradlew.toString(), "build", "--console=plain");
-		} else {
-			gradleCmd = List.of("gradle", "build", "--console=plain");
-		}
+		List<String> gradleCmd = buildCommand(projectDir);
 
 		var pb = new ProcessBuilder(gradleCmd);
 		pb.directory(projectDir.toFile());

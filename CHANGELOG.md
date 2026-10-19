@@ -1,5 +1,58 @@
 # 更新日志
 
+## v0.5.4 已发布 — 公测准备：快照一致性、取消语义与真实安装验收
+
+### 第一阶段：源码审查修复
+
+#### P0: 后台导出彻底脱离运行时定义
+- **`validatePlanShape` 纯快照化**：Mod ID 格式、名称安全、输出目录符号链接、注册 ID 冲突（物品 vs BlockItem）全部从方案冻结数据校验，零运行时查询
+- **`capabilityReportOf` 快照报告**：`ExportPlan.create` 的能力报告直接由深拷贝定义计算（同一份数据），报告与导出永不背离
+- **端到端证明**（`PlanOnlyExportTest` 5 项）：建方案→删除定义→分离存储→导出仍成功且内容正确；实时编辑不污染冻结报告；快照冲突检测
+
+#### P1: 深度不可变 ExportPlan
+- 全部嵌套参数/行为列表/属性 Map 深拷贝冻结（`ExportPlanDeepImmutabilityTest` 4 项）：原始 Map 事后投毒不泄漏、所有集合拒绝修改、并发读取稳定、可变类型创建时拒绝
+
+#### P1: 取消构建终态语义
+- 取消→CANCELLED（绝不误记 FAILED）、失败→FAILED、超时→TIMEOUT、完成→OK；终态 `compareAndSet` 不可覆盖
+- **预哈希检查点**：构建完成后取消无法追溯丢弃产物——竞争规则明确且测试覆盖
+- **多阶段竞争测试**（`ExportCancellationRaceTest` 24 项）：构建前/生成中/Gradle 运行中/进程刚退出/SHA-256 阶段 × 多轮重复 + 并发 cancel
+- 非 OK 终态清理全部 JAR，保留源码工程并明确告知用户
+
+### 第二阶段：隔离实例真实安装验收（51/51 通过）
+
+**全新安装路径**（不用开发缓存）：
+- Fabric Installer 1.0.1 经代理安装 Loader 0.16.9 + MC 1.21.1（直连超时→代理成功，记录网络细节）
+- 从 Mojang piston-meta 下载 1.21.1 客户端 + 97 库文件（102 MB，108 秒，零失败）+ 3911 assets（50 分钟）
+- mods 仅放 Fabric API + WorldForge 0.5.4 候选 JAR（SHA-256 双侧核对一致）
+
+**发现并修复的死锁**（jstack 实锤定位）：
+- tick handler 内调用 `createIntegratedServerLoader().start()` 阻塞渲染线程 → `startIntegratedServer` sleep-poll 死锁（Preparing spawn 0% 永久卡住）
+- 修复：隔离验收改走 QuickPlay（主函数加载世界），tick 内只等待不重复 start
+
+**隔离实例完整流程 51 项全部通过**：
+- QuickPlay 进入真实新世界 → Studio → 导出页 → 字段输入/全选 → 降级阻止/确认/失效/取消 → **真实 Gradle 构建 auto_mod-1.0.1.jar 成功** → 取消重导出 → Scale 1/2/3 布局审计 → ESC 语义
+
+**布局真实缺陷修复**（截图暴露）：GUI Scale 2/3 下虚拟宽高仅 427×240/285×160，原布局列溢出窗口——自适应行距 + 窄窗堆叠列布局，layoutRegionsAreDisjoint 三档全过
+
+**导出模板测试修复**：闪电断言改用 UUID 增量（批内共享世界的旧闪电消失会造成计数假阴性），standalone 8/8 稳定
+
+### 第三阶段：交付体验
+
+- `docs/BETA-GUIDE.md`：中文安装教程、5 分钟示例、能力清单（保留/警告/不支持三档）、环境要求、API Key 安全说明、常见问题排查
+- 明确标注：AI 生成使用本地测试服务验证；真实 DeepSeek/OpenAI 兼容性待公测反馈
+
+### 验证汇总
+
+| 验证层 | 结果 |
+|--------|------|
+| JUnit | 163/163（+30 新测试） |
+| WorldForge GameTest | 61/61 |
+| Standalone GameTest | 8/8 |
+| 隔离实例 GUI 验收 | 51/51（含真实构建 + 截图 + SHA-256） |
+| 候选 JAR | worldforge-0.5.4.jar · SHA-256 da780cff…5da32 |
+
+---
+
 ## v0.5.3 已发布 — 导出器可靠性与真实客户端验收
 
 **核心目标**：把已有导出能力做成普通玩家真正可以可靠使用的产品。

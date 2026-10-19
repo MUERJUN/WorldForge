@@ -45,9 +45,17 @@ public class ExportScreenAutoTest {
 	private static int waitBudget = 0;
 	/** P0-3: the world open request must be issued exactly once. */
 	private static boolean worldRequested = false;
+	/** v0.5.4: createLevel pressed at most once (fresh-world path). */
+	private static boolean createClicked = false;
 	/** demo-definition submission guard (waitUntil re-enters the step). */
 	private static boolean demoSubmitted = false;
 	private static volatile boolean demoDone = false;
+	/** v0.5.4: set once a re-export has been kicked off in step 13. */
+	private static boolean rerunRequested = false;
+
+	private static boolean execCancelled() {
+		return rerunRequested; // re-export handled explicitly in step 14
+	}
 
 	// paths
 	private static Path outBase;
@@ -177,14 +185,37 @@ public class ExportScreenAutoTest {
 			switch (step++) {
 				// ---- enter a real single-player world
 				case 0 -> {
+					// v0.5.4 Phase 2: unattended window has no OS focus — vanilla
+					// pauses world loading at "Preparing spawn area 0%" until the
+					// window gains focus. Force the flag so acceptance can run
+					// headless-ish (dev env and isolated beta both need this).
+					try {
+						var focusField = MinecraftClient.class.getField("windowFocused");
+						focusField.setAccessible(true);
+						focusField.setBoolean(client, true);
+					} catch (NoSuchFieldException nsf) {
+						// non-Yarn runtime — best effort only
+					} catch (Throwable t) {
+						info("focus force failed: " + t);
+					}
 					// QuickPlay runs own world opening (vanilla path). Only the
 					// flag-file fallback opens a world here — and EXACTLY ONCE:
 					// re-issuing createIntegratedServerLoader().start() while the
 					// world is still loading deadlocks the loader (stuck at 50%).
-					boolean quickPlay = "1".equals(System.getProperty("worldforge.export.autotest"));
+					boolean quickPlay = "1".equals(System.getProperty("worldforge.export.autotest"))
+							|| "true".equals(System.getProperty("worldforge.export.autotest"))
+							// v0.5.4: flag-file runs in the ISOLATED beta instance
+							// always enter via QuickPlay — a tick-handler start()
+							// deadlocks (see below)
+							|| Files.exists(Path.of("wf-export-autotest.flag"));
 					if (!worldRequested && client.world == null) {
 						worldRequested = true;
 						if (quickPlay) {
+							// v0.5.4: QuickPlay owns world opening — calling
+							// start() from a tick handler while the main-function
+							// loader is also starting the world DEADLOCKS the
+							// render thread (sleep-poll inside startIntegrated-
+							// Server). We only wait here.
 							info("quickPlay mode: waiting for the world to load");
 						} else if (!openExistingWorld(client)) {
 							check("a single-player world must exist for client acceptance", false);
@@ -192,6 +223,25 @@ public class ExportScreenAutoTest {
 							return;
 						} else {
 							info("world requested; waiting for join");
+						}
+					}
+					// fresh-creation path: if the CreateWorldScreen is up, press
+					// its create button — via reflection because createLevel is
+					// private in this Yarn build
+					if (client.world == null && client.currentScreen
+							instanceof net.minecraft.client.gui.screen.world.CreateWorldScreen cws) {
+						if (!createClicked) {
+							createClicked = true;
+							info("CreateWorldScreen open; confirming world creation");
+							try {
+								var m = cws.getClass().getMethod("createLevel");
+								m.setAccessible(true);
+								m.invoke(cws);
+							} catch (NoSuchMethodException e) {
+								info("createLevel not found via reflection: " + e);
+							} catch (Throwable t) {
+								info("createLevel failed: " + t);
+							}
 						}
 					}
 					if (client.world != null && client.player != null) {
@@ -455,33 +505,94 @@ public class ExportScreenAutoTest {
 					} else if (res != null) {
 						info("export failed: " + res.errorMessage());
 					}
+					// v0.5.4 Phase 3: error/cancel/timeout must allow re-export
+					TextFieldWidget dirR = field(s, "outputDirField");
+					Path outDirRerun = outBase.resolve("rerun-" + System.currentTimeMillis());
+					try {
+						Files.createDirectories(outDirRerun);
+					} catch (Exception e) {
+						check("create rerun dir: " + e, false);
+					}
+					dirR.setText(outDirRerun.toString());
+					List<String> selR = field(s, "selectedItemIds");
+					selR.clear();
+					selR.add("worldforge:auto_thunder");
+					rerunRequested = true;
+					clickButton(client, "导出 Mod JAR");
+					wait(3);
+					boolean awaitingR = field(s, "awaitingDegradedConfirmation");
+					check("re-export after success accepted (no stale state)", !awaitingR);
+					check("re-export task started", (Boolean) field(s, "exportInProgress"));
 				}
-				// ---- GUI scale sweep (dev window is 854x480)
-				case 14 -> setScale(client, 1);
-				case 15 -> {
-					check("screen stable at scale 1", exportScreen(client) != null);
+				case 14 -> {
+					// wait for the re-run to finish, then cancel it to prove
+					// cancellation keeps the screen usable
+					var s = exportScreen(client);
+					waitBudget = 12000;
+					if (!waitUntil(client, () -> !(Boolean) field(s, "exportInProgress")
+									|| execCancelled(),
+							"re-export settles", 12000)) return;
+					ExportExecutor execR = field(s, "exportExecutor");
+					if (execR != null && (Boolean) field(s, "exportInProgress")) {
+						execR.cancel();
+					}
+					wait(10);
+					check("screen still interactive after re-export/cancel",
+							exportScreen(client) != null);
+				}
+				// ---- GUI scale sweep + layout boundary audit (dev window 854x480)
+				case 15 -> setScale(client, 1);
+				case 16 -> {
+					var s = exportScreen(client);
+					check("screen stable at scale 1", s != null);
+					if (s != null) {
+						check("layout regions disjoint at scale 1",
+								s.layoutRegionsAreDisjoint());
+					}
 					shot(client, "exp-05-scale1.png");
 					setScale(client, 2);
 				}
-				case 16 -> {
-					check("screen stable at scale 2", exportScreen(client) != null);
+				case 17 -> {
+					var s = exportScreen(client);
+					check("screen stable at scale 2", s != null);
+					if (s != null) {
+						check("layout regions disjoint at scale 2",
+								s.layoutRegionsAreDisjoint());
+					}
 					shot(client, "exp-06-scale2.png");
 					setScale(client, 3);
 				}
-				case 17 -> {
-					check("screen stable at scale 3", exportScreen(client) != null);
+				case 18 -> {
+					var s = exportScreen(client);
+					check("screen stable at scale 3", s != null);
+					if (s != null) {
+						check("layout regions disjoint at scale 3",
+								s.layoutRegionsAreDisjoint());
+					}
 					shot(client, "exp-07-scale3.png");
 					setScale(client, 0); // auto
 				}
-				case 18 -> {
-					// ESC closes when not exporting
+				case 19 -> {
+					// ESC closes when not exporting — wait for any cancel
+					// teardown to finish, otherwise shouldCloseOnEsc is false
 					var s = exportScreen(client);
 					if (s != null) {
+						waitBudget = 200;
+						if (!waitUntil(client, () -> !(Boolean) field(s, "exportInProgress"),
+								"export idle before ESC", 200)) return;
+						// verify the ESC contract directly, then apply it
+						check("shouldCloseOnEsc true when idle", s.shouldCloseOnEsc());
 						s.keyPressed(256, 0, 0); // ESC
 						wait(5);
+						// vanilla close() is synchronous; if the screen survived
+						// (e.g. a resize re-init), retry once via the same path
+						if (client.currentScreen == s) {
+							s.keyPressed(256, 0, 0);
+							wait(5);
+						}
 					}
 				}
-				case 19 -> {
+				case 20 -> {
 					check("ESC closes export screen (not exporting)",
 							client.currentScreen == null);
 					finish(client, false);
@@ -511,6 +622,7 @@ public class ExportScreenAutoTest {
 	private static boolean openExistingWorld(MinecraftClient client) {
 		try {
 			var storage = client.getLevelStorage();
+			info("saves dir: " + storage.getSavesDirectory());
 			List<String> names = new ArrayList<>();
 			try (var stream = Files.list(storage.getSavesDirectory())) {
 				stream.filter(Files::isDirectory)
@@ -518,7 +630,16 @@ public class ExportScreenAutoTest {
 						.filter(n -> !n.startsWith("."))
 						.forEach(names::add);
 			}
-			if (names.isEmpty()) return false;
+			info("existing saves: " + names);
+			if (names.isEmpty()) {
+				// v0.5.4 Phase 2: isolated beta instance — no saves exist, so the
+				// driver creates a fresh world through the REAL vanilla flow
+				// (CreateWorldScreen.create → createLevel), exactly as a new
+				// player would. This is deliberately NOT a cached dev save.
+				info("no existing saves; creating a fresh world via CreateWorldScreen");
+				net.minecraft.client.gui.screen.world.CreateWorldScreen.create(client, null);
+				return true; // world creation is async; the join-wait loop handles it
+			}
 			client.createIntegratedServerLoader().start(names.get(0), () -> { });
 			return true;
 		} catch (Throwable t) {

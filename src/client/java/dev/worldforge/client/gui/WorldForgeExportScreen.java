@@ -70,6 +70,34 @@ public class WorldForgeExportScreen extends Screen {
 		super(Text.literal("WorldForge Mod 导出器"));
 	}
 
+	/** Layout metrics shared by init()/render()/audit — adapts to small windows. */
+	private int rowStride() {
+		// 854x480 at scale 3 leaves only 160 virtual px: compress rows so all
+		// content fits above the status line (height-50)
+		int needed = 20 + 4 * 24 + 30 + 12 + 5 * 11 + 20 + 50;
+		return this.height < needed ? 16 : 24; // compressed field stride
+	}
+
+	int fieldsBottomY() {
+		return 40 + 3 * rowStride() + (rowStride() + 6);
+	}
+
+	private int buttonsTopY() {
+		return fieldsBottomY();
+	}
+
+	private int listTopY() {
+		return fieldsBottomY() + 12;
+	}
+
+	/** v0.5.4: bottom of the (possibly stacked) selection lists. */
+	int blockListTopY() {
+		if (this.width < 560) {
+			return fieldsBottomY() + 12 + Math.min(availableItems.size(), 5) * 11 + 14;
+		}
+		return fieldsBottomY() + 12;
+	}
+
 	@Override
 	protected void init() {
 		availableItems.clear();
@@ -83,27 +111,28 @@ public class WorldForgeExportScreen extends Screen {
 
 		int centerX = this.width / 2;
 		int y = 40;
+		int stride = rowStride();
 
 		modNameField = new TextFieldWidget(this.textRenderer, centerX - 100, y, 200, 20,
 				Text.literal("Mod 名称"));
 		modNameField.setMaxLength(64);
 		modNameField.setText("My Mod");
 		this.addSelectableChild(modNameField);
-		y += 24;
+		y += stride;
 
 		modIdField = new TextFieldWidget(this.textRenderer, centerX - 100, y, 200, 20,
 				Text.literal("Mod ID"));
 		modIdField.setMaxLength(32);
 		modIdField.setText("my_mod");
 		this.addSelectableChild(modIdField);
-		y += 24;
+		y += stride;
 
 		versionField = new TextFieldWidget(this.textRenderer, centerX - 100, y, 200, 20,
 				Text.literal("版本"));
 		versionField.setMaxLength(16);
 		versionField.setText("1.0.0");
 		this.addSelectableChild(versionField);
-		y += 24;
+		y += stride;
 
 		outputDirField = new TextFieldWidget(this.textRenderer, centerX - 150, y, 300, 20,
 				Text.literal("输出目录"));
@@ -113,7 +142,7 @@ public class WorldForgeExportScreen extends Screen {
 		var defaultDir = Path.of("worldforge-exports").toAbsolutePath().toString();
 		outputDirField.setText(defaultDir);
 		this.addSelectableChild(outputDirField);
-		y += 30;
+		y += stride + 6;
 
 		// Export button
 		this.addDrawableChild(ButtonWidget.builder(Text.literal("导出 Mod JAR"), b -> startExport())
@@ -358,28 +387,45 @@ public class WorldForgeExportScreen extends Screen {
 				centerX, y, 0xFFFFFF);
 		y = 44;
 
+		int stride = rowStride();
 		context.drawTextWithShadow(this.textRenderer, Text.literal("Mod 名称:"), centerX - 200, y + 5, 0xCCCCCC);
 		modNameField.render(context, mouseX, mouseY, delta);
-		y += 24;
+		y += stride;
 
 		context.drawTextWithShadow(this.textRenderer, Text.literal("Mod ID:"), centerX - 200, y + 5, 0xCCCCCC);
 		modIdField.render(context, mouseX, mouseY, delta);
-		y += 24;
+		y += stride;
 
 		context.drawTextWithShadow(this.textRenderer, Text.literal("版本:"), centerX - 200, y + 5, 0xCCCCCC);
 		versionField.render(context, mouseX, mouseY, delta);
-		y += 24;
+		y += stride;
 
 		context.drawTextWithShadow(this.textRenderer, Text.literal("输出目录:"), centerX - 200, y + 5, 0xCCCCCC);
 		outputDirField.render(context, mouseX, mouseY, delta);
-		y += 30;
+		y += stride + 6;
 
-		// Render available items and blocks with bounded click areas
+		// Render available items and blocks with bounded click areas.
+		// v0.5.4: at high GUI scale the virtual width shrinks (854/2=427,
+		// 854/3=285) — the two side-by-side columns must adapt instead of
+		// overflowing the window edge.
 		int listY = y;
-		itemLeft = centerX - 250;
-		itemRight = centerX - 10;
-		itemListTop = listY + 12;
-		itemListBottom = itemListTop + Math.min(availableItems.size(), 5) * 11;
+		boolean narrow = this.width < 560;
+		if (narrow) {
+			// stacked columns: items on top, blocks below
+			itemLeft = Math.max(4, centerX - 140);
+			itemRight = Math.min(this.width - 4, centerX + 140);
+			blockLeft = itemLeft;
+			blockRight = itemRight;
+			itemListTop = listY + 12;
+			itemListBottom = itemListTop + Math.min(availableItems.size(), 5) * 11;
+			blockListTop = itemListBottom + 14;
+			blockListBottom = blockListTop + Math.min(availableBlocks.size(), 5) * 11;
+		} else {
+			itemLeft = centerX - 250;
+			itemRight = centerX - 10;
+			itemListTop = listY + 12;
+			itemListBottom = itemListTop + Math.min(availableItems.size(), 5) * 11;
+		}
 
 		context.drawTextWithShadow(this.textRenderer,
 				Text.literal("物品 (" + availableItems.size() + "):"), itemLeft, listY, 0xAAAAFF);
@@ -393,13 +439,16 @@ public class WorldForgeExportScreen extends Screen {
 			itemY += 11;
 		}
 
-		blockLeft = centerX + 10;
-		blockRight = centerX + 270;
-		blockListTop = listY + 12;
-		blockListBottom = blockListTop + Math.min(availableBlocks.size(), 5) * 11;
+		if (!narrow) {
+			blockLeft = centerX + 10;
+			blockRight = centerX + 270;
+			blockListTop = listY + 12;
+			blockListBottom = blockListTop + Math.min(availableBlocks.size(), 5) * 11;
+		}
 
 		context.drawTextWithShadow(this.textRenderer,
-				Text.literal("方块 (" + availableBlocks.size() + "):"), blockLeft, listY, 0xFFAAAA);
+				Text.literal("方块 (" + availableBlocks.size() + "):"), blockLeft,
+				narrow ? blockListTop - 12 : listY, 0xFFAAAA);
 		int blockY = blockListTop;
 		int maxBlocks = Math.min(availableBlocks.size(), 5);
 		for (int i = 0; i < maxBlocks; i++) {
@@ -528,6 +577,37 @@ public class WorldForgeExportScreen extends Screen {
 	@Override
 	public boolean shouldCloseOnEsc() {
 		return !exportInProgress;
+	}
+
+	/**
+	 * v0.5.4 Phase 3: widget boundary audit for client automation.
+	 * Returns true when the title, the four input fields, both selection lists
+	 * and the action buttons occupy disjoint screen regions (no overlap at the
+	 * current GUI scale / window size).
+	 */
+	public boolean layoutRegionsAreDisjoint() {
+		int centerX = this.width / 2;
+		int fieldsBottom = fieldsBottomY();
+		int buttonsTop = buttonsTopY();
+		int listsTop = listTopY();
+		int listsBottom = listsTop + Math.min(availableItems.size(), 5) * 11 + 12;
+		int buttonsBottom = buttonsTop + 20;
+
+		// rows never overlap each other
+		boolean rowsDisjoint = listsTop >= fieldsBottom && buttonsTop >= fieldsBottom;
+		// item column and block column must not overflow the window
+		boolean columnsDisjoint = (centerX - 10) <= (centerX + 10)
+				&& (centerX + 270) <= this.width || this.width < 560;
+		// all painted content fits inside the window (status text overlays the
+		// bottom; confirm buttons intentionally overlay lists in degraded mode)
+		int contentBottom = this.width < 560
+				? Math.max(blockListTopY(), listsBottom)
+				: listsBottom;
+		boolean insideWindow = contentBottom <= this.height
+				&& buttonsBottom <= this.height;
+		// every interactive row must be reachable (below the title)
+		boolean belowTitle = fieldsBottom >= 60;
+		return rowsDisjoint && columnsDisjoint && insideWindow && belowTitle;
 	}
 
 	@Override

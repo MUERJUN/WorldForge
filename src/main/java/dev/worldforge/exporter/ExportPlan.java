@@ -63,12 +63,14 @@ public record ExportPlan(
 			}
 			blocks.add(deepCopy(def));
 		}
-		var report = ModExporter.buildCapabilityReport(
-				new ModExporter.ExportRequest(modId, modName, version,
-						outputDir == null ? null : java.nio.file.Path.of(outputDir),
-						List.copyOf(itemIds), List.copyOf(blockIds)));
+		// v0.5.4 P0: report derives from the SAME frozen copies that will be
+		// exported — no second read of the live managers, so the report the
+		// user sees can never diverge from the snapshot actually exported.
+		var frozenItems = List.copyOf(items);
+		var frozenBlocks = List.copyOf(blocks);
+		var report = ModExporter.capabilityReportOf(frozenItems, frozenBlocks);
 		return new ExportPlan(modId, modName, version, outputDir,
-				List.copyOf(items), List.copyOf(blocks), report,
+				frozenItems, frozenBlocks, report,
 				false, System.currentTimeMillis());
 	}
 
