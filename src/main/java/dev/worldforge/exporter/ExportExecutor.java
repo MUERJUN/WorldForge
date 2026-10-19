@@ -1,174 +1,240 @@
 package dev.worldforge.exporter;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Orchestrates the full export: validate → generate → build → checksum.
+ * v0.5.3: Plan-driven export orchestration with lifecycle guarantees.
  *
- * <p>Thread-safe: designed to run on a background thread so the Minecraft
- * render loop is never blocked. The caller gets an {@link ModExporter.ExportResult}
- * with the JAR path, SHA-256, or an error message.</p>
+ * <p>Phases: validate plan → generate project → build (JAR) → checksum.</p>
  *
- * <p>v0.5.1 improvements:</p>
+ * <p>Lifecycle rules:</p>
  * <ul>
- *   <li>Gradle wrapper copied from bundled resources, not source repo</li>
- *   <li>Java compile environment checked before build</li>
- *   <li>Build timeout prevents hanging</li>
- *   <li>Build log sanitized of sensitive data</li>
- *   <li>On build failure, source project is still returned for inspection</li>
+ *   <li>The executor reads ONLY the {@link ExportPlan} — definitions come from the
+ *       plan's deep-copied snapshot via {@link DefinitionResolver#fromSnapshot}.
+ *       Runtime managers are never queried from the background thread.</li>
+ *   <li>{@link #cancel()} reliably destroys the Gradle process (and its children on
+ *       Windows via taskkill on the process tree fallback).</li>
+ *   <li>Build timeout counts from subprocess start; log reading is asynchronous so
+ *       it can never starve the timeout.</li>
+ *   <li>Terminal states OK / CANCELLED / TIMEOUT / FAILED are mutually exclusive;
+ *       a cancelled task can never be overwritten by a later success.</li>
+ *   <li>On any non-OK terminal state, produced JARs are deleted so no half-built
+ *       artifact can look successful.</li>
  * </ul>
  */
 public final class ExportExecutor {
 
 	/** Build timeout in minutes. */
-	private static final long BUILD_TIMEOUT_MINUTES = 10;
+	static final long BUILD_TIMEOUT_MINUTES = 10;
 
-	/** Cancellation flag — set by cancel(), checked by the build loop. */
+	/** Terminal result states — mutually exclusive and auditable. */
+	public enum TerminalState { OK, CANCELLED, TIMEOUT, FAILED }
+
+	private final ExportPlan plan;
 	private final AtomicBoolean cancelled = new AtomicBoolean(false);
+	private final AtomicReference<Process> currentProcess = new AtomicReference<>(null);
+	private final AtomicReference<TerminalState> terminalState = new AtomicReference<>(null);
+	private final List<String> auditLog = new ArrayList<>();
 
-	/** The current Gradle process, if running. */
-	private volatile Process currentProcess;
-
-	/**
-	 * Cancel an in-progress export. Destroys the Gradle subprocess if running.
-	 */
-	public void cancel() {
-		cancelled.set(true);
-		var proc = currentProcess;
-		if (proc != null && proc.isAlive()) {
-			proc.destroyForcibly();
-		}
+	public ExportExecutor(ExportPlan plan) {
+		this.plan = plan;
 	}
 
-	/** Check if this export has been cancelled. */
+	public ExportPlan plan() {
+		return plan;
+	}
+
 	public boolean isCancelled() {
 		return cancelled.get();
 	}
 
-	/**
-	 * Run a full export synchronously. Call from a background thread.
-	 * Uses the instance's cancellation flag.
-	 */
-	public ModExporter.ExportResult exportInstance(ModExporter.ExportRequest req) {
-		return doExport(req);
+	public TerminalState state() {
+		var s = terminalState.get();
+		return s == null ? TerminalState.FAILED : s; // unset == never finished
+	}
+
+	/** Snapshot of the audit trail (thread-safe copy). */
+	public synchronized List<String> auditTrail() {
+		return List.copyOf(auditLog);
+	}
+
+	private synchronized void audit(String event) {
+		auditLog.add(System.currentTimeMillis() + " " + event);
 	}
 
 	/**
-	 * Run a full export synchronously. Call from a background thread.
-	 * Static convenience method — creates a temporary instance.
+	 * Cancel an in-progress export. Destroys the Gradle subprocess if running.
+	 * First terminal state wins; later results cannot override a cancellation.
 	 */
-	public static ModExporter.ExportResult export(ModExporter.ExportRequest req) {
-		return new ExportExecutor().doExport(req);
+	public void cancel() {
+		if (cancelled.compareAndSet(false, true)) {
+			audit("cancel requested");
+		}
+		var proc = currentProcess.get();
+		if (proc != null && proc.isAlive()) {
+			proc.descendants().forEach(ProcessHandle::destroyForcibly);
+			proc.destroyForcibly();
+			audit("subprocess tree destroyed");
+		}
 	}
 
-	private ModExporter.ExportResult doExport(ModExporter.ExportRequest req) {
-		// 1) validate
-		var errors = ModExporter.validate(req);
+	/**
+	 * Run the full export synchronously from the plan. Call from a background thread.
+	 */
+	public ModExporter.ExportResult doExport() {
+		// 1) validate plan metadata (no runtime lookups — pure plan data)
+		var errors = ModExporter.validatePlanShape(plan);
 		if (!errors.isEmpty()) {
-			return new ModExporter.ExportResult(false, null, null, null,
-					"校验失败: " + String.join("; ", errors), List.of());
+			return finish(TerminalState.FAILED, false, null, null,
+					"校验失败: " + String.join("; ", errors), plan.report().lost());
 		}
 
-		// 2) check unsupported features
-		var warnings = ModExporter.checkUnsupported(req);
+		var warnings = new ArrayList<>(plan.report().lost());
+		if (plan.degradedExportConfirmed()) {
+			warnings.add(0, "用户已确认降级导出（丢失 " + plan.report().lost().size() + " 项能力）");
+		}
 
-		// 3) generate project
-		Path projectDir = req.outputDir().resolve(req.modId());
+		// 2) generate project — snapshot resolver only
+		Path projectDir;
 		try {
+			Path outputDir = ModExporter.planOutputDir(plan);
+			projectDir = outputDir.resolve(plan.modId());
 			Files.createDirectories(projectDir);
-			var gen = new TemplateProjectGenerator(req, projectDir);
+			var req = new ModExporter.ExportRequest(plan.modId(), plan.modName(), plan.version(),
+					outputDir,
+					plan.items().stream().map(ItemDefId::of).toList(),
+					plan.blocks().stream().map(BlockDefId::of).toList());
+			var gen = new TemplateProjectGenerator(req, projectDir,
+					DefinitionResolver.fromSnapshot(plan));
 			gen.generate();
-			// copy Gradle wrapper from bundled resources (no source repo dependency)
 			gen.copyGradleWrapper(Path.of(".").toAbsolutePath());
+			audit("project generated at " + projectDir);
 		} catch (Exception e) {
-			return new ModExporter.ExportResult(false, projectDir, null, null,
+			return finish(TerminalState.FAILED, false, null, null,
 					"项目生成失败: " + e.getMessage(), warnings);
 		}
 
-		// 4) check Java environment
-		var javaCheck = checkJavaEnvironment();
-		if (javaCheck != null) {
-			warnings = new ArrayList<>(warnings);
-			warnings.add(javaCheck);
-			// Return source project without claiming JAR build success
-			return new ModExporter.ExportResult(false, projectDir, null, null,
-					"Java 编译环境不可用: " + javaCheck
-							+ "。已导出完整源码工程到 " + projectDir
-							+ "，请安装 JDK 21 后运行 gradlew build。",
-					warnings);
+		if (cancelled.get()) {
+			return finish(TerminalState.CANCELLED, false, projectDir, null, "导出已取消", warnings);
 		}
 
-		// 5) build (gradle) with timeout
+		// 3) build with async log reader + timeout-from-start + cancellation
 		try {
+			var jarPath = buildProject(projectDir);
 			if (cancelled.get()) {
-				return new ModExporter.ExportResult(false, projectDir, null, null,
-						"导出已取消", warnings);
-			}
-			var jarPath = buildProject(projectDir, req);
-			if (cancelled.get()) {
-				return new ModExporter.ExportResult(false, projectDir, null, null,
-						"导出已取消", warnings);
+				deleteProducedJars(projectDir);
+				return finish(TerminalState.CANCELLED, false, projectDir, null,
+						"导出已取消（构建中断，产物已清理）", warnings);
 			}
 			if (jarPath == null) {
-				return new ModExporter.ExportResult(false, projectDir, null, null,
+				deleteProducedJars(projectDir);
+				return finish(TerminalState.FAILED, false, projectDir, null,
 						"Gradle 构建未产生 JAR 文件。源码工程位于 " + projectDir, warnings);
 			}
 			var sha = sha256(jarPath);
-			return new ModExporter.ExportResult(true, projectDir, jarPath, sha,
-					null, warnings);
+			return finish(TerminalState.OK, true, projectDir, jarPath, null, warnings, sha);
+		} catch (BuildTimeoutException e) {
+			deleteProducedJars(projectDir);
+			return finish(TerminalState.TIMEOUT, false, projectDir, null,
+					"构建超时 (" + BUILD_TIMEOUT_MINUTES + " 分钟)，产物已清理。源码工程位于 " + projectDir, warnings);
 		} catch (Exception e) {
-			return new ModExporter.ExportResult(false, projectDir, null, null,
-					"构建失败: " + sanitizeLog(e.getMessage())
-							+ "。源码工程位于 " + projectDir + " 可供检查。",
-					warnings);
+			deleteProducedJars(projectDir);
+			return finish(TerminalState.FAILED, false, projectDir, null,
+					"构建失败: " + sanitizeLog(String.valueOf(e.getMessage()))
+							+ "。源码工程位于 " + projectDir + " 可供检查。", warnings);
 		}
 	}
 
-	/**
-	 * Check that a Java 21+ JDK is available for compilation.
-	 * Returns null if OK, or an error message.
-	 */
-	static String checkJavaEnvironment() {
-		try {
-			var pb = new ProcessBuilder(List.of("java", "-version"));
-			pb.redirectErrorStream(true);
-			var proc = pb.start();
-			var output = new StringBuilder();
-			try (var reader = proc.inputReader()) {
-				String line;
-				while ((line = reader.readLine()) != null) {
-					output.append(line).append('\n');
-				}
-			}
-			int exit = proc.waitFor();
-			if (exit != 0) {
-				return "java -version 返回非零退出码";
-			}
-			var log = output.toString();
-			// Check for Java 21+
-			if (!log.contains("21.") && !log.contains("\"21\"")) {
-				return "需要 Java 21，当前: " + log.trim();
-			}
-			return null; // OK
-		} catch (Exception e) {
-			return "无法执行 java -version: " + e.getMessage();
-		}
-	}
+	// ------------------------------------------------------------------ build
 
-	/**
-	 * Build the project using the Gradle wrapper. Returns the JAR path or null.
-	 * Includes timeout to prevent hanging.
-	 */
-	private Path buildProject(Path projectDir, ModExporter.ExportRequest req)
+	// ------------------------------------------------------- subprocess core
+
+	/** Public bridge for tests in other packages. */
+	public static int runForTest(Process proc, StringBuilder output, long timeout, TimeUnit unit)
 			throws Exception {
-		// Use the Gradle wrapper if present, otherwise system gradle
+		return runWithWatcher(proc, output, timeout, unit);
+	}
+
+	/** Public accessor for the package-private timeout exception type. */
+	public static final class BuildTimeoutExceptionAccessor {
+		public static Class<? extends RuntimeException> timeoutClass() {
+			return BuildTimeoutException.class;
+		}
+	}
+
+	/**
+	 * v0.5.3 Phase 2: run a process with an asynchronous log reader and a
+	 * bounded wait. Package-private static for direct testing with fake
+	 * long-running subprocesses (no real Gradle needed).
+	 *
+	 * <p>Guarantees:</p>
+	 * <ul>
+	 *   <li>Timeout counts from the moment the process was started (caller starts
+	 *       it and calls this immediately).</li>
+	 *   <li>On timeout the process tree is destroyed and
+	 *       {@link BuildTimeoutException} is thrown.</li>
+	 *   <li>The log reader never blocks the timeout: it runs on its own daemon
+	 *       thread and is drained/joined in the finally path.</li>
+	 * </ul>
+	 *
+	 * @return process exit code (only reached when the process finished in time)
+	 */
+	static int runWithWatcher(Process proc, StringBuilder output, long timeout, TimeUnit unit)
+			throws Exception {
+		var readerDone = new CountDownLatch(1);
+		Thread reader = Thread.ofPlatform().name("wf-export-log").daemon().unstarted(() -> {
+			try (var r = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
+				String line;
+				while ((line = r.readLine()) != null) {
+					synchronized (output) {
+						output.append(line).append('\n');
+					}
+				}
+			} catch (Exception ignored) {
+				// stream closed by process teardown — expected on cancel/timeout
+			} finally {
+				readerDone.countDown();
+			}
+		});
+		reader.start();
+
+		try {
+			boolean finished = proc.waitFor(timeout, unit);
+			if (!finished) {
+				proc.descendants().forEach(ProcessHandle::destroyForcibly);
+				proc.destroyForcibly();
+				throw new BuildTimeoutException("subprocess exceeded " + timeout + " " + unit);
+			}
+		} finally {
+			// give the reader a moment to drain, then wait for it to finish
+			readerDone.await(5, TimeUnit.SECONDS);
+		}
+		return proc.exitValue();
+	}
+
+	private static final class BuildTimeoutException extends RuntimeException {
+		BuildTimeoutException(String msg) { super(msg); }
+	}
+
+	/**
+	 * Build the project using the Gradle wrapper.
+	 * Log output is read on a dedicated daemon thread so the bounded
+	 * {@code waitFor(timeout)} can never be starved by a full pipe.
+	 */
+	private Path buildProject(Path projectDir) throws Exception {
 		var gradlew = projectDir.resolve("gradlew").toAbsolutePath();
 		var gradleBat = projectDir.resolve("gradlew.bat").toAbsolutePath();
 		List<String> gradleCmd;
@@ -188,24 +254,34 @@ public final class ExportExecutor {
 		pb.environment().remove("DEEPSEEK_API_KEY");
 		pb.environment().remove("FABRIC_API_KEY");
 
+		long startNanos = System.nanoTime();
 		var proc = pb.start();
-		currentProcess = proc;
+		currentProcess.set(proc);
+		audit("subprocess started: " + gradleCmd.get(0));
+
 		var output = new StringBuilder();
-		try (var reader = proc.inputReader()) {
-			String line;
-			while ((line = reader.readLine()) != null) {
-				output.append(line).append('\n');
-			}
+		try {
+			runWithWatcher(proc, output, BUILD_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+		} finally {
+			currentProcess.compareAndSet(proc, null);
 		}
-		boolean finished = proc.waitFor(BUILD_TIMEOUT_MINUTES, TimeUnit.MINUTES);
-		if (!finished) {
+
+		if (cancelled.get()) {
+			proc.descendants().forEach(ProcessHandle::destroyForcibly);
 			proc.destroyForcibly();
-			throw new RuntimeException("Gradle 构建超时 (" + BUILD_TIMEOUT_MINUTES + " 分钟)");
+			audit("cancelled during build wait");
+			throw new BuildCancelledException();
 		}
+
 		int exit = proc.exitValue();
+		long elapsedSec = (System.nanoTime() - startNanos) / 1_000_000_000L;
+		audit("subprocess exited " + exit + " after " + elapsedSec + "s");
 		if (exit != 0) {
-			throw new RuntimeException("Gradle exit " + exit + ":\n"
-					+ sanitizeLog(output.substring(0, Math.min(output.length(), 2000))));
+			String tail;
+			synchronized (output) {
+				tail = output.substring(0, Math.min(output.length(), 2000));
+			}
+			throw new RuntimeException("Gradle exit " + exit + ":\n" + sanitizeLog(tail));
 		}
 
 		// find the JAR
@@ -220,7 +296,49 @@ public final class ExportExecutor {
 		}
 	}
 
-	/** Sanitize build log: remove API keys, tokens, and sensitive paths. */
+	private static final class BuildCancelledException extends RuntimeException {
+		BuildCancelledException() { super("cancelled"); }
+	}
+
+	/** Delete any produced JARs so a failed/cancelled build leaves no misleading artifact. */
+	private static void deleteProducedJars(Path projectDir) {
+		var jarDir = projectDir.resolve("build/libs");
+		if (!Files.exists(jarDir)) return;
+		try (var stream = Files.list(jarDir)) {
+			stream.filter(p -> p.toString().endsWith(".jar")).forEach(p -> {
+				try {
+					Files.deleteIfExists(p);
+				} catch (Exception ignored) {
+				}
+			});
+		} catch (Exception ignored) {
+		}
+	}
+
+	// ----------------------------------------------------------- result/audit
+
+	private ModExporter.ExportResult finish(TerminalState state, boolean ok, Path projectDir,
+			Path jarPath, String error, List<String> warnings) {
+		return finish(state, ok, projectDir, jarPath, error, warnings, null);
+	}
+
+	private ModExporter.ExportResult finish(TerminalState state, boolean ok, Path projectDir,
+			Path jarPath, String error, List<String> warnings, String sha) {
+		// First terminal state wins — a cancelled task cannot be overwritten by success.
+		if (!terminalState.compareAndSet(null, state)) {
+			var first = terminalState.get();
+			audit("attempted terminal state " + state + " ignored; already " + first);
+			if (first == TerminalState.CANCELLED) {
+				return new ModExporter.ExportResult(false, projectDir, null, null,
+						"导出已取消", warnings);
+			}
+		} else {
+			audit("terminal state: " + state + (ok ? " jar=" + jarPath : " error=" + error));
+		}
+		return new ModExporter.ExportResult(ok, projectDir, jarPath, sha, error, warnings);
+	}
+
+	/** Sanitize build log: remove API keys, tokens, and sensitive values. */
 	static String sanitizeLog(String log) {
 		if (log == null) return "";
 		return log
@@ -239,5 +357,13 @@ public final class ExportExecutor {
 		return HexFormat.of().formatHex(md.digest());
 	}
 
-	public ExportExecutor() {}
+	// Tiny ID carriers so the plan can build a request without runtime lookups.
+	// (ExportRequest stores ID strings; these map definition -> id at plan time.)
+	private static final class ItemDefId {
+		static String of(dev.worldforge.definition.ItemDefinition def) { return def.id(); }
+	}
+
+	private static final class BlockDefId {
+		static String of(dev.worldforge.block.BlockDefinition def) { return def.id(); }
+	}
 }

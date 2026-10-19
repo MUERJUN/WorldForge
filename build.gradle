@@ -27,6 +27,15 @@ loom {
 			programArgs "--quickPlaySingleplayer", project.findProperty("wfWorld") ?: "New World"
 			property "worldforge.autotest", "1"
 		}
+		// v0.5.3 P0-3: export-screen full client acceptance via QuickPlay — a
+		// SEPARATE automation flag so StudioAutoTest and ExportScreenAutoTest
+		// never run in the same client instance (they would fight over screens).
+		clientExportTest {
+			client()
+			configName = "Minecraft Client (export autotest)"
+			programArgs "--quickPlaySingleplayer", project.findProperty("wfWorld") ?: "New World"
+			property "worldforge.export.autotest", "1"
+		}
 	}
 }
 

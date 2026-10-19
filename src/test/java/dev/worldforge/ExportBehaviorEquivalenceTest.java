@@ -161,19 +161,28 @@ class ExportBehaviorEquivalenceTest {
 		var blockClass = Files.readString(projectDir.resolve(
 				"src/main/java/thunder/mod/MagicDeviceBlock.java"));
 
-		// P1-1: Cooldown key must be world-aware (not just BlockPos)
-		assertTrue(blockClass.contains("cooldownKey"),
-				"Block must use cooldownKey method for world-aware cooldown");
-		assertTrue(blockClass.contains("getRegistryKey"),
-				"Cooldown key must include world registry key to prevent cross-world contamination");
+		// v0.5.3 Phase 3: cooldown must live in a per-instance BlockEntity,
+		// NOT in any static map (cross-save/coordinate bugs).
+		assertTrue(blockClass.contains("getBlockEntity"),
+				"Block must read cooldown from its BlockEntity instance");
+		assertTrue(blockClass.contains("MagicDeviceBlockEntity"),
+				"Block must reference its generated BlockEntity class");
 		assertFalse(blockClass.contains("Map<BlockPos, Long> LAST_USE"),
 				"Block must NOT use raw BlockPos as cooldown key (cross-world bug)");
+		assertFalse(blockClass.contains("static Map"),
+				"Block must not keep any static cooldown state");
 
-		// P1-1: onStateReplaced must clear cooldown on block removal
-		assertTrue(blockClass.contains("onStateReplaced"),
-				"Block must override onStateReplaced to clear cooldown on removal");
-		assertTrue(blockClass.contains("LAST_USE.remove"),
-				"onStateReplaced must remove the cooldown entry");
+		// The companion BlockEntity persists cooldown state via NBT
+		var entityClass = Files.readString(projectDir.resolve(
+				"src/main/java/thunder/mod/MagicDeviceBlockEntity.java"));
+		assertTrue(entityClass.contains("extends BlockEntity"),
+				"Generated entity must extend BlockEntity");
+		assertTrue(entityClass.contains("writeNbt") && entityClass.contains("readNbt"),
+				"Entity must persist cooldown via NBT (survives reload/restart)");
+		assertTrue(entityClass.contains("LastUseTick"),
+				"Entity must store the last-use tick");
+		assertTrue(entityClass.contains("registerType"),
+				"Entity must register its BlockEntityType");
 
 		cleanup();
 	}

@@ -1,5 +1,69 @@
 # 更新日志
 
+## v0.5.3 已发布 — 导出器可靠性与真实客户端验收
+
+**核心目标**：把已有导出能力做成普通玩家真正可以可靠使用的产品。
+
+### P0-1: 让导出快照真正生效
+
+- **`ExportPlan` 不可变方案**：游戏线程上一次性解析全部选中定义并深拷贝（行为、参数、属性全部重建为不可变集合），附能力报告与输出目录
+- **`DefinitionResolver` 抽象**：`fromRuntime()`（方案创建，仅客户端线程）与 `fromSnapshot(plan)`（后台线程只读快照）两种实现
+- **TemplateProjectGenerator 去运行时化**：全部 12 处 `WorldForgeRuntimeManager/BlockRuntimeManager` 查询改为 resolver 路由，后台导出不再触碰实时数据
+- **导出与编辑解耦**：方案创建后删除/编辑定义、切换世界均不影响进行中的导出；JAR 内容与确认时的方案一致
+- **回归测试**：`ExportPlanSnapshotTest` 5 项 —— 删除后快照可导出、编辑后方案保留原值、8 线程并发建方案、runtime 分离后快照仍可解析、降级确认副本
+
+### P0-2: 修复降级确认 UI
+
+- **状态即可见性**：确认/取消按钮的 visible/active 在状态变化点直接设置（不再依赖渲染帧时序），普通模式完全隐藏禁用
+- **完整能力报告**：保留/转换/丢失三段平铺 + 鼠标滚轮滚动查看
+- **确认失效**：任何字段修改、全选、列表选择变化立即作废旧确认并隐藏按钮
+- **同一方案执行**：确认时执行用户看到的同一份 ExportPlan（`withDegradedConfirmation`），不重新读取已变动表单
+- **ESC/取消语义**：第一次 ESC 取消确认，第二次才关闭；关闭/取消均恢复初始状态
+
+### P0-3: 真正完成导出 GUI 自动化（42 项检查全部通过）
+
+- **真实客户端全流程**：QuickPlay 进入真实单人世界 → Studio 按钮 → 导出页 → 字段输入回读 → 全选物品 → 触发降级方案
+- **关键断言**：确认前无构建线程、无 executor、无产物；确认按钮先隐藏后出现；表单修改后失效；取消后无 JAR 残留；取消状态 CANCELLED
+- **真实构建**：仅支持项导出真实完成 `auto_mod-1.0.1.jar` 构建 + SHA-256 校验
+- **多分辨率**：854×480 下 GUI Scale 1/2/3 全部稳定 + 7 张真实截图
+- **失败即验收失败**：任何 FAIL 抛出 RuntimeException 使 runClient 退出码非 0，绝不静默通过
+- **修复过程**：修复前 10 项失败 → 逐项根因修复（输入框 32 字符截断路径、窗口失焦暂停阻塞 server.execute、渲染帧时序、step 计数跳过）→ 42/42
+
+### 第二阶段：构建生命周期与超时
+
+- **异步日志读取**：Gradle 子进程输出由独立守护线程读取，有界 `waitFor` 不再被管道写满饿死
+- **超时从启动计时**：10 分钟上限，超时销毁整棵进程树（descendants + destroyForcibly）
+- **可靠取消**：`cancel()` 设置标志 + 销毁进程树；构建等待退出后检查取消并清理
+- **互斥终态**：OK/CANCELLED/TIMEOUT/FAILED 首次到达生效，取消后不能再被成功覆盖（compareAndSet）
+- **产物清理**：非 OK 终态删除 build/libs 下 JAR，不留"看似成功"的半成品
+- **审计日志**：`auditTrail()` 记录启动/退出码/取消/超时时间线
+- **假进程测试**：`SubprocessLifecycleTest` 4 项 —— 30 秒 ping 进程 1 秒超时销毁、取消销毁、日志回读、持续输出不饿死超时
+
+### 第三阶段：冷却状态正确性（BlockEntity）
+
+- **专用 Block Entity**：行为方块生成 `XBlockEntity`，冷却时间戳存在实体实例中（`HasBeenUsed` + `LastUseTick`）
+- **NBT 持久化**：writeNbt/readNbt 走原版区块存档 —— 跨存档隔离、世界重启恢复、区块卸载重载不丢
+- **方块即状态**：破坏方块即销毁状态，重放不再继承旧冷却；不同存档天然隔离
+- **时间回拨安全**：`now < lastUseTick` 视为冷却过期（回拨作废冷却，不永久卡死）
+- **首次使用语义**：`hasBeenUsed` 标志区分"从未使用"与"tick 0 使用"，杜绝 first-use 误拦
+- **8/8 独立 GameTest**：新增 `blockEntityPersistence` —— NBT 写出→新实体恢复→状态逐字段相等
+
+### 第四阶段：独立 Mod 真实验证
+
+- **真实放置与交互**：GameTest 在世界中放置方块并直接调用 onUse 断言效果与冷却
+- **实体存在断言**：闪电测试统计世界中 LIGHTNING_BOLT 数量增量，不再只看返回值
+- **JAR 内容审计**：含 MagicDeviceBlockEntity.class、不含 WorldForge 依赖/API Key/存档（3 项 JAR 测试）
+- **跨测试隔离**：GameTest 改用 `getAbsolutePos` + 放置前 AIR 清理，杜绝相邻测试的残留 BlockEntity 污染
+
+### 验证汇总
+
+- JUnit 133 项全部通过
+- GameTest 61/61 全部通过
+- 独立 Mod GameTest 8/8 全部通过
+- 真实客户端 GUI 验收 42/42 全部通过（含真实 JAR 构建 + 取消 + 多分辨率截图）
+
+---
+
 ## v0.5.2 已发布 — 导出 GUI 与行为等价性加固
 
 **核心修复**：解决 v0.5.1 导出器的双重模糊问题，增加能力丢失确认，强化独立模组冷却状态。

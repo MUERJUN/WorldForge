@@ -263,5 +263,30 @@ public final class ModExporter {
 				java.util.List.copyOf(lost));
 	}
 
+	// ------------------------------------------------------- plan-based API
+
+	/**
+	 * v0.5.3 P0-1: Convert a plan to its equivalent request (no runtime lookups).
+	 */
+	public static ExportRequest toRequest(ExportPlan plan) {
+		return new ExportRequest(plan.modId(), plan.modName(), plan.version(),
+				plan.outputDir() == null ? null : java.nio.file.Path.of(plan.outputDir()),
+				plan.items().stream().map(ItemDefinition::id).toList(),
+				plan.blocks().stream().map(BlockDefinition::id).toList());
+	}
+
+	/**
+	 * v0.5.3 P0-1: Validate a plan's shape (metadata, output dir) without
+	 * querying runtime managers — safe on any thread.
+	 */
+	public static List<String> validatePlanShape(ExportPlan plan) {
+		return validate(toRequest(plan));
+	}
+
+	/** The plan's resolved output directory. */
+	public static java.nio.file.Path planOutputDir(ExportPlan plan) {
+		return java.nio.file.Path.of(plan.outputDir());
+	}
+
 	private ModExporter() {}
 }

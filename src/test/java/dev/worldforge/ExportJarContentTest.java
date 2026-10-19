@@ -83,6 +83,9 @@ class ExportJarContentTest {
 			// Must contain the custom block class with behavior
 			assertNotNull(jar.getEntry("thunder/mod/MagicDeviceBlock.class"),
 					"JAR must contain MagicDeviceBlock.class (behavior implementation)");
+			// Must contain the per-instance cooldown BlockEntity (v0.5.3)
+			assertNotNull(jar.getEntry("thunder/mod/MagicDeviceBlockEntity.class"),
+					"JAR must contain MagicDeviceBlockEntity.class (cooldown persistence)");
 			// Must contain fabric.mod.json
 			assertNotNull(jar.getEntry("fabric.mod.json"),
 					"JAR must contain fabric.mod.json");

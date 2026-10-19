@@ -1,9 +1,7 @@
 package dev.worldforge.exporter;
 
 import dev.worldforge.definition.ItemDefinition;
-import dev.worldforge.runtime.WorldForgeRuntimeManager;
 import dev.worldforge.block.BlockDefinition;
-import dev.worldforge.block.BlockRuntimeManager;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -21,10 +19,18 @@ public final class TemplateProjectGenerator {
 
 	private final ModExporter.ExportRequest req;
 	private final Path root;
+	/** v0.5.3 P0-1: where definitions come from — runtime (client thread) or plan snapshot (background). */
+	private final DefinitionResolver resolver;
 
 	public TemplateProjectGenerator(ModExporter.ExportRequest req, Path root) {
+		this(req, root, DefinitionResolver.fromRuntime());
+	}
+
+	/** Plan-driven constructor: background export threads pass {@link DefinitionResolver#fromSnapshot}. */
+	public TemplateProjectGenerator(ModExporter.ExportRequest req, Path root, DefinitionResolver resolver) {
 		this.req = req;
 		this.root = root;
+		this.resolver = resolver;
 	}
 
 	public void generate() throws IOException {
@@ -46,14 +52,14 @@ public final class TemplateProjectGenerator {
 		if (!req.itemIds().isEmpty()) {
 			writeModItems(src);
 			for (String id : req.itemIds()) {
-				ItemDefinition def = WorldForgeRuntimeManager.get(id);
+				ItemDefinition def = resolver.getItem(id);
 				if (def != null) writeCustomItem(src, def);
 			}
 		}
 		if (!req.blockIds().isEmpty()) {
 			writeModBlocks(src);
 			for (String id : req.blockIds()) {
-				BlockDefinition def = BlockRuntimeManager.get(id);
+				BlockDefinition def = resolver.getBlock(id);
 				if (def != null) writeCustomBlock(src, def);
 			}
 		}
@@ -90,7 +96,7 @@ public final class TemplateProjectGenerator {
 		sb.append("public class ExportedModTest {\n");
 		int testNum = 0;
 		for (String id : req.itemIds()) {
-			ItemDefinition def = WorldForgeRuntimeManager.get(id);
+			ItemDefinition def = resolver.getItem(id);
 			if (def == null) continue;
 			var nativeId = nativeItemId(id);
 			testNum++;
@@ -187,7 +193,7 @@ public final class TemplateProjectGenerator {
 			}
 		}
 		for (String id : req.blockIds()) {
-			BlockDefinition def = BlockRuntimeManager.get(id);
+			BlockDefinition def = resolver.getBlock(id);
 			if (def == null) continue;
 			var nativeId = nativeBlockId(id);
 			testNum++;
@@ -223,8 +229,10 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\tvar block = Registries.BLOCK.get(Identifier.of(\"")
 						.append(req.modId()).append("\", \"").append(nativeId).append("\"));\n");
 				// Place the block
-				sb.append("\t\tBlockPos pos = new BlockPos(0, 1, 0);\n");
+				sb.append("\t\tBlockPos pos = ctx.getAbsolutePos(new BlockPos(0, 2, 0));\n");
 				sb.append("\t\tvar state = block.getDefaultState();\n");
+				sb.append("\t\t// fresh placement: destroy any stale BlockEntity first\n");
+				sb.append("\t\tworld.setBlockState(pos, net.minecraft.block.Blocks.AIR.getDefaultState());\n");
 				sb.append("\t\tworld.setBlockState(pos, state);\n");
 				// Right-click the block via custom block's onUse (public)
 				sb.append("\t\tvar hit = new BlockHitResult(new Vec3d(0.5, 1.0, 0.5), Direction.NORTH, pos, false);\n");
@@ -268,8 +276,9 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\tServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();\n");
 				sb.append("\t\tvar block = Registries.BLOCK.get(Identifier.of(\"")
 						.append(req.modId()).append("\", \"").append(nativeId).append("\"));\n");
-				sb.append("\t\tBlockPos pos = new BlockPos(0, 1, 0);\n");
+				sb.append("\t\tBlockPos pos = ctx.getAbsolutePos(new BlockPos(0, 2, 0));\n");
 				sb.append("\t\tvar state = block.getDefaultState();\n");
+				sb.append("\t\tworld.setBlockState(pos, net.minecraft.block.Blocks.AIR.getDefaultState());\n");
 				sb.append("\t\tworld.setBlockState(pos, state);\n");
 				sb.append("\t\tvar hit = new BlockHitResult(new Vec3d(0.5, 1.0, 0.5), Direction.NORTH, pos, false);\n");
 				sb.append("\t\tvar customBlock = (").append(blockClassName).append(") block;\n");
@@ -286,6 +295,50 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\t\t}\n");
 				sb.append("\t\t\tctx.complete();\n");
 				sb.append("\t\t});\n");
+				sb.append("\t}\n\n");
+
+				// v0.5.3 Phase 4: BlockEntity cooldown state must survive an NBT
+				// round-trip (chunk save -> world reload semantics)
+				testNum++;
+				sb.append("\t@GameTest(templateName = \"fabric-gametest-api-v1:empty\", batchId = \"exported\")\n");
+				sb.append("\tpublic static void blockEntityPersistence").append(testNum)
+						.append("(TestContext ctx) {\n");
+				sb.append("\t\tServerWorld world = ctx.getWorld();\n");
+				sb.append("\t\tvar block = Registries.BLOCK.get(Identifier.of(\"")
+						.append(req.modId()).append("\", \"").append(nativeId).append("\"));\n");
+				sb.append("\t\tvar state = block.getDefaultState();\n");
+				sb.append("\t\t// unique per-test absolute positions — other tests share raw coords\n");
+				sb.append("\t\tBlockPos pos = ctx.getAbsolutePos(new BlockPos(0, 2, 0));\n");
+				sb.append("\t\t// destroy any stale block entity left by earlier tests at this spot\n");
+				sb.append("\t\tworld.setBlockState(pos, net.minecraft.block.Blocks.AIR.getDefaultState());\n");
+				sb.append("\t\tworld.setBlockState(pos, state);\n");
+				sb.append("\t\tvar be = world.getBlockEntity(pos);\n");
+				sb.append("\t\tif (!(be instanceof ").append(blockClassName).append("Entity entity)) {\n");
+				sb.append("\t\t\tthrow new AssertionError(\"BlockEntity missing after placement — per-instance cooldown unavailable\");\n");
+				sb.append("\t\t}\n");
+				sb.append("\t\tentity.markUsed(world.getTime());\n");
+				sb.append("\t\tlong savedTick = entity.lastUseTick();\n");
+				sb.append("\t\tvar nbt = entity.createNbt(world.getRegistryManager());\n");
+				sb.append("\t\tif (!nbt.getBoolean(\"HasBeenUsed\")\n");
+				sb.append("\t\t\t\t|| nbt.getLong(\"LastUseTick\") != savedTick) {\n");
+				sb.append("\t\t\tthrow new AssertionError(\"NBT must capture the cooldown state on save\");\n");
+				sb.append("\t\t}\n");
+				sb.append("\t\t// simulate chunk reload: a fresh entity restores the saved NBT\n");
+				sb.append("\t\tBlockPos pos2 = ctx.getAbsolutePos(new BlockPos(2, 2, 0));\n");
+				sb.append("\t\tworld.setBlockState(pos2, net.minecraft.block.Blocks.AIR.getDefaultState());\n");
+				sb.append("\t\tworld.setBlockState(pos2, state);\n");
+				sb.append("\t\tvar be2 = world.getBlockEntity(pos2);\n");
+				sb.append("\t\tif (!(be2 instanceof ").append(blockClassName).append("Entity restored)) {\n");
+				sb.append("\t\t\tthrow new AssertionError(\"second BlockEntity missing\");\n");
+				sb.append("\t\t}\n");
+				sb.append("\t\tif (restored.hasBeenUsed()) {\n");
+				sb.append("\t\t\tthrow new AssertionError(\"fresh entity must start unused\");\n");
+				sb.append("\t\t}\n");
+				sb.append("\t\trestored.read(nbt, world.getRegistryManager());\n");
+				sb.append("\t\tif (!restored.hasBeenUsed() || restored.lastUseTick() != savedTick) {\n");
+				sb.append("\t\t\tthrow new AssertionError(\"cooldown state must survive NBT round-trip (world reload)\");\n");
+				sb.append("\t\t}\n");
+				sb.append("\t\tctx.complete();\n");
 				sb.append("\t}\n\n");
 			}
 		}
@@ -560,7 +613,7 @@ public final class TemplateProjectGenerator {
 		sb.append("\tprivate ModItems() {}\n\n");
 		sb.append("\tstatic void initialize() {\n");
 		for (String id : req.itemIds()) {
-			ItemDefinition def = WorldForgeRuntimeManager.get(id);
+			ItemDefinition def = resolver.getItem(id);
 			if (def == null) continue;
 			var field = itemFieldName(def);
 			var nativeId = nativeItemId(id);
@@ -579,7 +632,7 @@ public final class TemplateProjectGenerator {
 
 		// Generate custom Item subclasses for items with behaviors
 		for (String id : req.itemIds()) {
-			ItemDefinition def = WorldForgeRuntimeManager.get(id);
+			ItemDefinition def = resolver.getItem(id);
 			if (def != null && !def.behaviors().isEmpty()) {
 				writeCustomItem(src, def);
 			}
@@ -727,7 +780,7 @@ public final class TemplateProjectGenerator {
 		sb.append("\tprivate ModBlocks() {}\n\n");
 		sb.append("\tstatic void initialize() {\n");
 		for (String id : req.blockIds()) {
-			BlockDefinition def = BlockRuntimeManager.get(id);
+			BlockDefinition def = resolver.getBlock(id);
 			if (def == null) continue;
 			var field = blockFieldName(def);
 			var nativeId = nativeBlockId(id);
@@ -742,6 +795,10 @@ public final class TemplateProjectGenerator {
 			sb.append("\t\tRegistry.register(Registries.ITEM,\n");
 			sb.append("\t\t\t\tIdentifier.of(\"").append(req.modId()).append("\", \"").append(nativeId).append("\"),\n");
 			sb.append("\t\t\t\tnew BlockItem(").append(field).append(", new Item.Settings()));\n");
+			if (hasBehaviors) {
+				// v0.5.3 Phase 3: per-instance cooldown state via BlockEntity
+				sb.append("\t\t").append(blockClassName(def)).append("Entity.registerType(").append(field).append(");\n");
+			}
 		}
 		sb.append("\t}\n");
 		sb.append("}\n");
@@ -749,7 +806,7 @@ public final class TemplateProjectGenerator {
 
 		// Generate custom Block subclasses for blocks with behaviors
 		for (String id : req.blockIds()) {
-			BlockDefinition def = BlockRuntimeManager.get(id);
+			BlockDefinition def = resolver.getBlock(id);
 			if (def != null && !def.behaviors().isEmpty()) {
 				writeCustomBlock(src, def);
 			}
@@ -759,58 +816,59 @@ public final class TemplateProjectGenerator {
 	private void writeCustomBlock(Path src, BlockDefinition def) throws IOException {
 		var pkg = req.modId().replace("_", ".");
 		var className = blockClassName(def);
+		var entityName = className + "Entity";
+		writeBlockEntity(src, def);
+
 		var sb = new StringBuilder();
 		sb.append("package ").append(pkg).append(";\n\n");
 		sb.append("import net.minecraft.block.Block;\n");
+		sb.append("import net.minecraft.block.BlockEntityProvider;\n");
 		sb.append("import net.minecraft.block.BlockState;\n");
+		sb.append("import net.minecraft.block.entity.BlockEntity;\n");
 		sb.append("import net.minecraft.entity.player.PlayerEntity;\n");
-		sb.append("import net.minecraft.registry.RegistryKey;\n");
-		sb.append("import net.minecraft.registry.RegistryKeys;\n");
 		sb.append("import net.minecraft.server.world.ServerWorld;\n");
 		sb.append("import net.minecraft.util.ActionResult;\n");
 		sb.append("import net.minecraft.util.hit.BlockHitResult;\n");
 		sb.append("import net.minecraft.util.math.BlockPos;\n");
-		sb.append("import net.minecraft.world.World;\n");
-		sb.append("import java.util.HashMap;\n");
-		sb.append("import java.util.Map;\n\n");
-		sb.append("/**\n * Custom block with exported behaviors for ").append(escapeJava(def.name())).append(".\n */\n");
-		sb.append("public final class ").append(className).append(" extends Block {\n\n");
+		sb.append("import net.minecraft.world.World;\n\n");
+		sb.append("/**\n * Custom block with exported behaviors for ").append(escapeJava(def.name())).append(".\n");
+		sb.append(" *\n * v0.5.3: cooldown state lives in a per-instance {@link ").append(entityName).append("}\n");
+		sb.append(" * (persisted via NBT) instead of a static map — isolated per world save,\n");
+		sb.append(" * cleared automatically when the block is removed, and bound to real\n");
+		sb.append(" * block instances rather than coordinates.\n */\n");
+		sb.append("public final class ").append(className).append(" extends Block implements BlockEntityProvider {\n\n");
 
-		// P1-1: Cooldown tracking — world-aware key prevents cross-world contamination
-		// Key format: "worldKey:x,y,z" so overworld(0,1,0) ≠ nether(0,1,0)
 		int cooldownTicks = def.behaviors().stream()
 				.mapToInt(dev.worldforge.definition.BehaviorDefinition::cooldownTicks)
 				.max().orElse(0);
-		sb.append("\tprivate static final int COOLDOWN_TICKS = ").append(cooldownTicks).append(";\n");
-		sb.append("\tprivate static final Map<String, Long> LAST_USE = new HashMap<>();\n\n");
-		sb.append("\tprivate static String cooldownKey(World world, BlockPos pos) {\n");
-		sb.append("\t\treturn world.getRegistryKey().getValue() + \":\" + pos.getX() + \",\" + pos.getY() + \",\" + pos.getZ();\n");
-		sb.append("\t}\n\n");
+		sb.append("\tprivate static final int COOLDOWN_TICKS = ").append(cooldownTicks).append(";\n\n");
 
 		sb.append("\tpublic ").append(className).append("(Settings settings) {\n");
 		sb.append("\t\tsuper(settings);\n");
 		sb.append("\t}\n\n");
 
-		// P1-1: Clear cooldown when block is removed — prevents stale inheritance
+		// v0.5.3: world-created per-instance state
 		sb.append("\t@Override\n");
-		sb.append("\tpublic void onStateReplaced(BlockState state, World world, BlockPos pos,\n");
-		sb.append("\t\t\tBlockState newState, boolean moved) {\n");
-		sb.append("\t\tif (!state.isOf(newState.getBlock())) {\n");
-		sb.append("\t\t\tLAST_USE.remove(cooldownKey(world, pos));\n");
-		sb.append("\t\t}\n");
-		sb.append("\t\tsuper.onStateReplaced(state, world, pos, newState, moved);\n");
+		sb.append("\tpublic BlockEntity createBlockEntity(BlockPos pos, BlockState state) {\n");
+		sb.append("\t\treturn new ").append(entityName).append("(pos, state);\n");
 		sb.append("\t}\n\n");
 
-		// Override onUse() — right click on block (public for testability)
+		// Override onUse() — right click on block (public for testability).
+		// Cooldown is read from / written to the block's own BlockEntity, so it
+		// survives chunk unload/reload and world restarts, is isolated per world
+		// save, and dies with the block when the block is broken.
 		sb.append("\t@Override\n");
 		sb.append("\tpublic ActionResult onUse(BlockState state, World world, BlockPos pos,\n");
 		sb.append("\t\t\tPlayerEntity player, BlockHitResult hit) {\n");
 		sb.append("\t\tif (world.isClient()) return ActionResult.PASS;\n");
+		sb.append("\t\tif (!(world.getBlockEntity(pos) instanceof ").append(entityName).append(" be)) {\n");
+		sb.append("\t\t\treturn ActionResult.PASS;\n");
+		sb.append("\t\t}\n");
 		sb.append("\t\tvar sw = (ServerWorld) world;\n");
 		sb.append("\t\tlong now = sw.getTime();\n");
-		sb.append("\t\tvar key = cooldownKey(world, pos);\n");
-		sb.append("\t\tvar last = LAST_USE.get(key);\n");
-		sb.append("\t\tif (last != null && COOLDOWN_TICKS > 0 && now - last < COOLDOWN_TICKS) {\n");
+		sb.append("\t\t// time rollback (e.g. /time set backwards) invalidates the cooldown\n");
+		sb.append("\t\tif (be.hasBeenUsed() && COOLDOWN_TICKS > 0 && now >= be.lastUseTick()\n");
+		sb.append("\t\t\t\t&& now - be.lastUseTick() < COOLDOWN_TICKS) {\n");
 		sb.append("\t\t\treturn ActionResult.PASS;\n");
 		sb.append("\t\t}\n");
 
@@ -821,12 +879,81 @@ public final class TemplateProjectGenerator {
 			}
 		}
 
-		sb.append("\t\tLAST_USE.put(key, now);\n");
+		sb.append("\t\tbe.markUsed(now);\n");
 		sb.append("\t\treturn ActionResult.SUCCESS;\n");
 		sb.append("\t}\n");
 
 		sb.append("}\n");
 		Files.writeString(src.resolve(className + ".java"), sb.toString());
+	}
+
+	/**
+	 * v0.5.3 Phase 3: generate a dedicated BlockEntity that stores the block's
+	 * cooldown state with full NBT persistence.
+	 */
+	private void writeBlockEntity(Path src, BlockDefinition def) throws IOException {
+		var pkg = req.modId().replace("_", ".");
+		var className = blockClassName(def);
+		var entityName = className + "Entity";
+		var beId = nativeBlockId(def.id()) + "_entity";
+
+		var sb = new StringBuilder();
+		sb.append("package ").append(pkg).append(";\n\n");
+		sb.append("import net.minecraft.block.Block;\n");
+		sb.append("import net.minecraft.block.BlockState;\n");
+		sb.append("import net.minecraft.block.entity.BlockEntity;\n");
+		sb.append("import net.minecraft.block.entity.BlockEntityType;\n");
+		sb.append("import net.minecraft.nbt.NbtCompound;\n");
+		sb.append("import net.minecraft.registry.Registries;\n");
+		sb.append("import net.minecraft.registry.Registry;\n");
+		sb.append("import net.minecraft.util.Identifier;\n");
+		sb.append("import net.minecraft.util.math.BlockPos;\n");
+		sb.append("import net.minecraft.registry.RegistryWrapper;\n\n");
+		sb.append("/**\n * Per-instance state for ").append(escapeJava(def.name())).append(".\n");
+		sb.append(" *\n * The cooldown timestamp is persisted in the chunk NBT, so it survives\n");
+		sb.append(" * chunk unload/reload and world restart, is scoped to the current world\n");
+		sb.append(" * save, and is destroyed together with the block.\n */\n");
+		sb.append("public final class ").append(entityName).append(" extends BlockEntity {\n\n");
+		sb.append("\tprivate static final String NBT_USED = \"HasBeenUsed\";\n");
+		sb.append("\tprivate static final String NBT_LAST_USE = \"LastUseTick\";\n\n");
+		sb.append("\t/** Assigned once during mod init (after block registration). */\n");
+		sb.append("\tpublic static BlockEntityType<").append(entityName).append("> TYPE;\n\n");
+		sb.append("\tprivate boolean hasBeenUsed = false;\n");
+		sb.append("\tprivate long lastUseTick = 0L;\n\n");
+		sb.append("\tpublic ").append(entityName).append("(BlockPos pos, BlockState state) {\n");
+		sb.append("\t\tsuper(TYPE, pos, state);\n");
+		sb.append("\t}\n\n");
+		sb.append("\tpublic boolean hasBeenUsed() {\n");
+		sb.append("\t\treturn hasBeenUsed;\n");
+		sb.append("\t}\n\n");
+		sb.append("\tpublic long lastUseTick() {\n");
+		sb.append("\t\treturn lastUseTick;\n");
+		sb.append("\t}\n\n");
+		sb.append("\tpublic void markUsed(long tick) {\n");
+		sb.append("\t\tthis.hasBeenUsed = true;\n");
+		sb.append("\t\tthis.lastUseTick = tick;\n");
+		sb.append("\t\tmarkDirty();\n");
+		sb.append("\t}\n\n");
+		sb.append("\t/** Register the block entity type. Call AFTER the block is registered. */\n");
+		sb.append("\tpublic static void registerType(Block... blocks) {\n");
+		sb.append("\t\tTYPE = Registry.register(Registries.BLOCK_ENTITY_TYPE,\n");
+		sb.append("\t\t\t\tIdentifier.of(\"").append(req.modId()).append("\", \"").append(beId).append("\"),\n");
+		sb.append("\t\t\t\tBlockEntityType.Builder.create(").append(entityName).append("::new, blocks).build());\n");
+		sb.append("\t}\n\n");
+		sb.append("\t@Override\n");
+		sb.append("\tprotected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registries) {\n");
+		sb.append("\t\tsuper.writeNbt(nbt, registries);\n");
+		sb.append("\t\tnbt.putBoolean(NBT_USED, hasBeenUsed);\n");
+		sb.append("\t\tnbt.putLong(NBT_LAST_USE, lastUseTick);\n");
+		sb.append("\t}\n\n");
+		sb.append("\t@Override\n");
+		sb.append("\tprotected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registries) {\n");
+		sb.append("\t\tsuper.readNbt(nbt, registries);\n");
+		sb.append("\t\thasBeenUsed = nbt.contains(NBT_USED) && nbt.getBoolean(NBT_USED);\n");
+		sb.append("\t\tlastUseTick = nbt.contains(NBT_LAST_USE) ? nbt.getLong(NBT_LAST_USE) : 0L;\n");
+		sb.append("\t}\n");
+		sb.append("}\n");
+		Files.writeString(src.resolve(entityName + ".java"), sb.toString());
 	}
 
 	private void generateBlockActionCode(StringBuilder sb, String action,
@@ -881,7 +1008,7 @@ public final class TemplateProjectGenerator {
 		sb.append("{\n");
 		boolean first = true;
 		for (String id : req.itemIds()) {
-			ItemDefinition def = WorldForgeRuntimeManager.get(id);
+			ItemDefinition def = resolver.getItem(id);
 			if (def == null) continue;
 			if (!first) sb.append(",\n");
 			first = false;
@@ -889,7 +1016,7 @@ public final class TemplateProjectGenerator {
 					.append("\": \"").append(escapeJson(def.name())).append("\"");
 		}
 		for (String id : req.blockIds()) {
-			BlockDefinition def = BlockRuntimeManager.get(id);
+			BlockDefinition def = resolver.getBlock(id);
 			if (def == null) continue;
 			if (!first) sb.append(",\n");
 			first = false;
@@ -905,7 +1032,7 @@ public final class TemplateProjectGenerator {
 		var itemModels = res.resolve("assets/" + req.modId() + "/models/item");
 		Files.createDirectories(itemModels);
 		for (String id : req.itemIds()) {
-			ItemDefinition def = WorldForgeRuntimeManager.get(id);
+			ItemDefinition def = resolver.getItem(id);
 			if (def == null) continue;
 			var nativeId = nativeItemId(id);
 			var appearance = def.texture().resource().replace("item/", "");
@@ -916,7 +1043,7 @@ public final class TemplateProjectGenerator {
 		var blockModels = res.resolve("assets/" + req.modId() + "/models/block");
 		Files.createDirectories(blockModels);
 		for (String id : req.blockIds()) {
-			BlockDefinition def = BlockRuntimeManager.get(id);
+			BlockDefinition def = resolver.getBlock(id);
 			if (def == null) continue;
 			var nativeId = nativeBlockId(id);
 			var appearance = def.appearance().replace("minecraft:", "");

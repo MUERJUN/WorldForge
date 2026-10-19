@@ -3,6 +3,7 @@ package dev.worldforge.client.gui;
 import dev.worldforge.block.BlockRuntimeManager;
 import dev.worldforge.definition.ItemDefinition;
 import dev.worldforge.exporter.ExportExecutor;
+import dev.worldforge.exporter.ExportPlan;
 import dev.worldforge.exporter.ModExporter;
 import dev.worldforge.runtime.WorldForgeRuntimeManager;
 import net.minecraft.client.gui.DrawContext;
@@ -11,6 +12,7 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
+import org.lwjgl.glfw.GLFW;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -46,6 +48,12 @@ public class WorldForgeExportScreen extends Screen {
 	// P0-2: Degraded export confirmation state
 	private ModExporter.CapabilityReport pendingReport = null;
 	private boolean awaitingDegradedConfirmation = false;
+	/** The exact plan the user saw and must confirm — never re-read from the form. */
+	private ExportPlan pendingPlan = null;
+	private ButtonWidget confirmButton = null;
+	private ButtonWidget cancelConfirmButton = null;
+	/** P0-2: scroll offset for the full capability report. */
+	private int reportScrollOffset = 0;
 
 	// Blur gating — same pattern as WorldForgeStudioScreen
 	private boolean blurDoneThisFrame = false;
@@ -78,24 +86,30 @@ public class WorldForgeExportScreen extends Screen {
 
 		modNameField = new TextFieldWidget(this.textRenderer, centerX - 100, y, 200, 20,
 				Text.literal("Mod 名称"));
+		modNameField.setMaxLength(64);
 		modNameField.setText("My Mod");
 		this.addSelectableChild(modNameField);
 		y += 24;
 
 		modIdField = new TextFieldWidget(this.textRenderer, centerX - 100, y, 200, 20,
 				Text.literal("Mod ID"));
+		modIdField.setMaxLength(32);
 		modIdField.setText("my_mod");
 		this.addSelectableChild(modIdField);
 		y += 24;
 
 		versionField = new TextFieldWidget(this.textRenderer, centerX - 100, y, 200, 20,
 				Text.literal("版本"));
+		versionField.setMaxLength(16);
 		versionField.setText("1.0.0");
 		this.addSelectableChild(versionField);
 		y += 24;
 
 		outputDirField = new TextFieldWidget(this.textRenderer, centerX - 150, y, 300, 20,
 				Text.literal("输出目录"));
+		// paths are long — the 32-char default would truncate and silently
+		// redirect exports into a wrong/partial directory
+		outputDirField.setMaxLength(256);
 		var defaultDir = Path.of("worldforge-exports").toAbsolutePath().toString();
 		outputDirField.setText(defaultDir);
 		this.addSelectableChild(outputDirField);
@@ -121,13 +135,27 @@ public class WorldForgeExportScreen extends Screen {
 				.dimensions(centerX - 160, y, 80, 20)
 				.build());
 
-		// P0-2: Confirmation buttons (hidden by default, shown when degraded export detected)
-		this.addDrawableChild(ButtonWidget.builder(Text.literal("我接受降级导出"), b -> confirmDegradedExport())
+		// P0-2: Confirmation buttons — created once, visibility/active bound to
+		// awaitingDegradedConfirmation in render(); completely hidden+disabled
+		// in normal mode.
+		confirmButton = ButtonWidget.builder(Text.literal("我接受降级导出"), b -> confirmDegradedExport())
 				.dimensions(centerX - 80, this.height - 80, 160, 20)
-				.build());
-		this.addDrawableChild(ButtonWidget.builder(Text.literal("取消"), b -> cancelDegradedConfirmation())
+				.build();
+		cancelConfirmButton = ButtonWidget.builder(Text.literal("取消"), b -> cancelDegradedConfirmation())
 				.dimensions(centerX + 90, this.height - 80, 80, 20)
-				.build());
+				.build();
+		confirmButton.visible = false;
+		confirmButton.active = false;
+		cancelConfirmButton.visible = false;
+		cancelConfirmButton.active = false;
+		this.addDrawableChild(confirmButton);
+		this.addDrawableChild(cancelConfirmButton);
+
+		// P0-2: any form edit invalidates a pending degraded confirmation
+		modNameField.setChangedListener(t -> invalidatePendingConfirmation());
+		modIdField.setChangedListener(t -> invalidatePendingConfirmation());
+		versionField.setChangedListener(t -> invalidatePendingConfirmation());
+		outputDirField.setChangedListener(t -> invalidatePendingConfirmation());
 	}
 
 	private void selectAllItems() {
@@ -135,6 +163,7 @@ public class WorldForgeExportScreen extends Screen {
 		for (var def : availableItems) {
 			selectedItemIds.add(def.id());
 		}
+		invalidatePendingConfirmation();
 		statusMessage = "已选择 " + selectedItemIds.size() + " 个物品";
 	}
 
@@ -143,11 +172,14 @@ public class WorldForgeExportScreen extends Screen {
 		for (var def : availableBlocks) {
 			selectedBlockIds.add(def.id());
 		}
+		invalidatePendingConfirmation();
 		statusMessage = "已选择 " + selectedBlockIds.size() + " 个方块";
 	}
 
 	/**
-	 * P0-2: Start export — first show capability report, block if capabilities lost.
+	 * P0-1/P0-2: Start export. Builds the ExportPlan ON THIS (client/game) thread,
+	 * shows the full capability report, and blocks degraded exports until the
+	 * user explicitly confirms the exact plan they were shown.
 	 */
 	private void startExport() {
 		if (exportInProgress) return;
@@ -168,89 +200,114 @@ public class WorldForgeExportScreen extends Screen {
 			return;
 		}
 
-		Path outDir;
 		try {
-			outDir = Path.of(outputDir);
-			Files.createDirectories(outDir);
+			Path.of(outputDir);
+			Files.createDirectories(Path.of(outputDir));
 		} catch (Exception e) {
 			statusMessage = "§c无法创建输出目录: " + e.getMessage();
 			return;
 		}
 
-		var req = new ModExporter.ExportRequest(
-				modId, modName, version, outDir,
-				List.copyOf(selectedItemIds), List.copyOf(selectedBlockIds));
+		// P0-1: create the immutable plan on the game thread — deep-copied
+		// definitions + capability report captured in one atomic step.
+		ExportPlan plan;
+		try {
+			plan = ExportPlan.create(modId, modName, version, outputDir,
+					List.copyOf(selectedItemIds), List.copyOf(selectedBlockIds));
+		} catch (Exception e) {
+			statusMessage = "§c无法创建导出方案: " + e.getMessage();
+			return;
+		}
 
-		var errors = ModExporter.validate(req);
+		// P0-2: shape validation before showing the report
+		var errors = ModExporter.validatePlanShape(plan);
 		if (!errors.isEmpty()) {
 			statusMessage = "§c校验失败: " + String.join("; ", errors);
 			return;
 		}
 
-		// P0-2: Build capability report and check for lost capabilities
-		var report = ModExporter.buildCapabilityReport(req);
-		pendingReport = report;
+		pendingPlan = plan;
+		pendingReport = plan.report();
 
-		if (!report.lost().isEmpty()) {
-			// Block export — require explicit confirmation
+		if (!plan.report().lost().isEmpty()) {
+			// Block export — require explicit confirmation of THIS plan
 			awaitingDegradedConfirmation = true;
-			statusMessage = "§e检测到 " + report.lost().size() + " 项无法导出的能力。"
-					+ "请确认是否接受降级导出。";
+			setConfirmationButtonsVisible(true);
+			statusMessage = "§e检测到 " + plan.report().lost().size()
+					+ " 项无法导出的能力。请查看报告后选择接受降级或取消。";
 			return;
 		}
 
-		// No lost capabilities — proceed directly
+		// No lost capabilities — proceed directly with the same plan
 		awaitingDegradedConfirmation = false;
-		proceedWithExport(req, report);
+		setConfirmationButtonsVisible(false);
+		proceedWithExport(plan);
 	}
 
+	/**
+	 * P0-2: Confirm degraded export — executes the SAME verified plan that was
+	 * displayed. Form fields are deliberately NOT re-read; if anything changed,
+	 * the pending confirmation was already invalidated.
+	 */
 	private void confirmDegradedExport() {
-		if (!awaitingDegradedConfirmation || pendingReport == null) return;
+		if (!awaitingDegradedConfirmation || pendingPlan == null) return;
+		if (!pendingPlan.sameContentAs(pendingPlan)) { // defensive; plan is immutable
+			invalidatePendingConfirmation();
+			statusMessage = "§c导出方案已变化，请重新发起导出。";
+			return;
+		}
 		awaitingDegradedConfirmation = false;
-
-		var modId = modIdField.getText();
-		var modName = modNameField.getText();
-		var version = versionField.getText();
-		var outputDir = outputDirField.getText();
-
-		var req = new ModExporter.ExportRequest(
-				modId, modName, version, Path.of(outputDir),
-				List.copyOf(selectedItemIds), List.copyOf(selectedBlockIds));
-
-		statusMessage = "§e用户确认降级导出。丢失 " + pendingReport.lost().size() + " 项能力。";
-		proceedWithExport(req, pendingReport);
+		var plan = pendingPlan.withDegradedConfirmation();
+		statusMessage = "§e用户确认降级导出。丢失 " + plan.report().lost().size() + " 项能力。";
+		proceedWithExport(plan);
 	}
 
 	private void cancelDegradedConfirmation() {
-		awaitingDegradedConfirmation = false;
-		pendingReport = null;
+		invalidatePendingConfirmation();
 		statusMessage = "已取消导出。";
 	}
 
-	private void proceedWithExport(ModExporter.ExportRequest req, ModExporter.CapabilityReport report) {
-		statusMessage = "§a开始导出... 保留 " + report.retained().size()
-				+ " 项能力, 丢失 " + report.lost().size() + " 项";
+	/**
+	 * P0-2: any parameter/selection change voids the displayed report and the
+	 * pending confirmation — the buttons hide immediately.
+	 */
+	private void invalidatePendingConfirmation() {
+		if (awaitingDegradedConfirmation || pendingPlan != null) {
+			awaitingDegradedConfirmation = false;
+			pendingPlan = null;
+			pendingReport = null;
+			setConfirmationButtonsVisible(false);
+			statusMessage = "导出参数已变化，此前的降级确认已失效。请重新发起导出。";
+		}
+	}
+
+	/**
+	 * P0-2: button visibility is tied to state changes themselves (not render
+	 * frames), so the UI is correct the instant the state flips.
+	 */
+	private void setConfirmationButtonsVisible(boolean visible) {
+		if (confirmButton != null) {
+			confirmButton.visible = visible;
+			confirmButton.active = visible;
+		}
+		if (cancelConfirmButton != null) {
+			cancelConfirmButton.visible = visible;
+			cancelConfirmButton.active = visible;
+		}
+	}
+
+	private void proceedWithExport(ExportPlan plan) {
+		statusMessage = "§a开始导出... 保留 " + plan.report().retained().size()
+				+ " 项能力, 丢失 " + plan.report().lost().size() + " 项";
 
 		exportInProgress = true;
 		result = null;
-		exportExecutor = new ExportExecutor();
-
-		// P1-3: Take an immutable snapshot of definitions before starting the background thread
-		var itemSnapshot = new ArrayList<ItemDefinition>();
-		for (String id : req.itemIds()) {
-			var def = WorldForgeRuntimeManager.get(id);
-			if (def != null) itemSnapshot.add(def);
-		}
-		var blockSnapshot = new ArrayList<dev.worldforge.block.BlockDefinition>();
-		for (String id : req.blockIds()) {
-			var def = BlockRuntimeManager.get(id);
-			if (def != null) blockSnapshot.add(def);
-		}
+		// P0-1: the executor and everything below it reads ONLY this plan.
+		exportExecutor = new ExportExecutor(plan);
 
 		exportThread = new Thread(() -> {
 			try {
-				// P1-3: Export operates on the snapshot, not live runtime data
-				result = exportExecutor.exportInstance(req);
+				result = exportExecutor.doExport();
 			} catch (Exception e) {
 				result = new ModExporter.ExportResult(false, null, null, null,
 						"导出异常: " + e.getMessage(), List.of());
@@ -275,6 +332,19 @@ public class WorldForgeExportScreen extends Screen {
 	@Override
 	public void render(DrawContext context, int mouseX, int mouseY, float delta) {
 		blurDoneThisFrame = false; // reset for this frame
+
+		// P0-2: bind confirmation buttons to the pending state — fully hidden
+		// and disabled in normal mode, enabled only while a degraded plan awaits
+		// user confirmation.
+		boolean confirming = awaitingDegradedConfirmation && pendingPlan != null;
+		if (confirmButton != null) {
+			confirmButton.visible = confirming;
+			confirmButton.active = confirming;
+		}
+		if (cancelConfirmButton != null) {
+			cancelConfirmButton.visible = confirming;
+			cancelConfirmButton.active = confirming;
+		}
 
 		// 1) vanilla background: blur once, then darken
 		renderBackground(context, mouseX, mouseY, delta);
@@ -340,26 +410,39 @@ public class WorldForgeExportScreen extends Screen {
 			blockY += 11;
 		}
 
-		// P0-2: Show capability report if pending
+		// P0-2: Show the FULL capability report (retained / converted / lost)
+		// with mouse-wheel scrolling while a degraded confirmation is pending.
 		if (awaitingDegradedConfirmation && pendingReport != null) {
-			int reportY = this.height - 140;
+			// Flatten all three sections into one scrollable list
+			var lines = new ArrayList<String>();
+			for (var r : pendingReport.retained()) lines.add("§a✓ " + r);
+			for (var c : pendingReport.converted()) lines.add("§b→ " + c);
+			for (var l : pendingReport.lost()) lines.add("§c✗ " + l);
+
+			int reportTop = this.height - 150;
+			int reportBottom = this.height - 84;
+			int visibleRows = Math.max(1, (reportBottom - reportTop - 24) / 10);
+			reportScrollOffset = Math.max(0, Math.min(reportScrollOffset,
+					Math.max(0, lines.size() - visibleRows)));
+
 			context.drawCenteredTextWithShadow(this.textRenderer,
-					Text.literal("§e=== 能力报告 ===").formatted(Formatting.BOLD),
-					centerX, reportY, 0xFFFF00);
-			reportY += 12;
-			context.drawCenteredTextWithShadow(this.textRenderer,
-					Text.literal("§a保留 " + pendingReport.retained().size() + " 项"),
-					centerX, reportY, 0x00FF00);
-			reportY += 11;
-			context.drawCenteredTextWithShadow(this.textRenderer,
-					Text.literal("§c丢失 " + pendingReport.lost().size() + " 项"),
-					centerX, reportY, 0xFF0000);
-			reportY += 11;
-			for (int i = 0; i < Math.min(pendingReport.lost().size(), 3); i++) {
-				context.drawCenteredTextWithShadow(this.textRenderer,
-						Text.literal("§c- " + pendingReport.lost().get(i)),
-						centerX, reportY, 0xFF6666);
-				reportY += 10;
+					Text.literal("§e=== 能力报告 (保留 " + pendingReport.retained().size()
+							+ " / 转换 " + pendingReport.converted().size()
+							+ " / 丢失 " + pendingReport.lost().size() + ") ==="),
+					centerX, reportTop, 0xFFFF00);
+			int rowY = reportTop + 12;
+			for (int i = reportScrollOffset;
+					i < Math.min(lines.size(), reportScrollOffset + visibleRows); i++) {
+				context.drawTextWithShadow(this.textRenderer,
+						Text.literal(lines.get(i)), centerX - 240, rowY, 0xFFFFFF);
+				rowY += 10;
+			}
+			if (lines.size() > visibleRows) {
+				context.drawTextWithShadow(this.textRenderer,
+						Text.literal("§7(滚轮查看更多 " + (reportScrollOffset + 1)
+								+ "-" + Math.min(lines.size(), reportScrollOffset + visibleRows)
+								+ "/" + lines.size() + ")"),
+						centerX - 240, reportBottom - 10, 0x888888);
 			}
 		}
 
@@ -411,6 +494,7 @@ public class WorldForgeExportScreen extends Screen {
 				} else {
 					selectedItemIds.add(id);
 				}
+				invalidatePendingConfirmation();
 				return true;
 			}
 		}
@@ -424,6 +508,7 @@ public class WorldForgeExportScreen extends Screen {
 				} else {
 					selectedBlockIds.add(id);
 				}
+				invalidatePendingConfirmation();
 				return true;
 			}
 		}
@@ -431,8 +516,28 @@ public class WorldForgeExportScreen extends Screen {
 	}
 
 	@Override
+	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+		// P0-2: ESC first cancels a pending degraded confirmation, a second ESC closes
+		if (keyCode == GLFW.GLFW_KEY_ESCAPE && awaitingDegradedConfirmation) {
+			cancelDegradedConfirmation();
+			return true;
+		}
+		return super.keyPressed(keyCode, scanCode, modifiers);
+	}
+
+	@Override
 	public boolean shouldCloseOnEsc() {
 		return !exportInProgress;
+	}
+
+	@Override
+	public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+		// P0-2: scroll the capability report while confirmation is pending
+		if (awaitingDegradedConfirmation && pendingReport != null) {
+			reportScrollOffset = Math.max(0, reportScrollOffset - (int) Math.signum(verticalAmount));
+			return true;
+		}
+		return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
 	}
 
 	@Override

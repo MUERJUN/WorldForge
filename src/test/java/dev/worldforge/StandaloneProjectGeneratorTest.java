@@ -86,6 +86,8 @@ class StandaloneProjectGeneratorTest {
 				"custom item class with behaviors must exist");
 		assertTrue(Files.exists(projectDir.resolve("src/main/java/thunder/mod/MagicDeviceBlock.java")),
 				"custom block class with behaviors must exist");
+		assertTrue(Files.exists(projectDir.resolve("src/main/java/thunder/mod/MagicDeviceBlockEntity.java")),
+				"per-instance cooldown BlockEntity must exist (v0.5.3 Phase 3)");
 
 		System.out.println("=== Standalone project generated at: " + projectDir.toAbsolutePath() + " ===");
 		System.out.println("To verify: cd " + projectDir.toAbsolutePath() + " && gradlew.bat build && gradlew.bat runGameTest");
