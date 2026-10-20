@@ -105,6 +105,20 @@ public final class AgentBridge {
 			AgentConfig.writeTemplate(file);
 			WorldForge.LOGGER.info("[WorldForge] agent config template written to {}", file);
 		}
+		// v0.5.5: retire the OLD provider FIRST — cancel its in-flight requests
+		// and release its executor — so a hot config swap can never leave
+		// requests running against stale credentials/endpoints.
+		var old = provider;
+		if (old != null) {
+			try {
+				old.cancelAll();
+				if (old instanceof OpenAICompatibleProvider oo) {
+					oo.shutdown();
+				}
+			} catch (Throwable t) {
+				WorldForge.LOGGER.warn("[WorldForge] old AI provider shutdown issue", t);
+			}
+		}
 		config = newCfg;
 		if (newCfg.usable()) {
 			provider = new OpenAICompatibleProvider(newCfg);

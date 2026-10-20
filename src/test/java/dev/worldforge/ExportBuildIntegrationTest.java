@@ -94,10 +94,12 @@ class ExportBuildIntegrationTest {
 		assertTrue(Files.exists(projectDir.resolve("gradle/wrapper/gradle-wrapper.jar")),
 				"gradle-wrapper.jar must exist");
 
-		// build the project
+		// build the project (same command as ExportExecutor: skip runGameTest —
+		// a nested Minecraft inside the test JVM exhausts the commit charge)
 		var isWin = System.getProperty("os.name").toLowerCase().contains("win");
 		var gradlew = projectDir.resolve(isWin ? "gradlew.bat" : "gradlew").toAbsolutePath().toString();
-		var pb = new ProcessBuilder(gradlew, "build", "--console=plain", "--no-daemon");
+		var pb = new ProcessBuilder(gradlew, "build", "-x", "runGameTest",
+				"--no-daemon", "--console=plain");
 		pb.directory(projectDir.toFile());
 		pb.redirectErrorStream(true);
 		pb.environment().put("JAVA_HOME", System.getenv("JAVA_HOME"));

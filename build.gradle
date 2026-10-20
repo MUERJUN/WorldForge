@@ -50,6 +50,12 @@ fabricApi {
 	}
 }
 
+// v0.5.5: cap the gameTest JVM — on memory-tight machines (page file nearly
+// exhausted by other apps) the default 2G+ reservation fails to commit.
+tasks.named('runGameTest') {
+	jvmArgs '-Xmx1G'
+}
+
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"

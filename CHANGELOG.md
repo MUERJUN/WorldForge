@@ -1,5 +1,42 @@
 # 更新日志
 
+## v0.5.5 已发布 — 安全修复与跨平台构建
+
+### 源码审查：8 项发现全部确认并修复
+
+| # | 缺陷 | 位置 | 修复 | 证据 |
+|---|------|------|------|------|
+| 1 | `experience`/`give_item` 被标支持但无生成实现（静默丢弃） | ModExporter.java isSupportedItemAction | 从支持清单移除，报告为 lost"无代码生成实现" | SecurityAuditFixTest#experienceActionIsNotClaimedAsSupported |
+| 2 | `hit_entity` 等触发器被并入 right-click use() | TemplateProjectGenerator.java writeCustomItem/writeCustomBlock | 触发器契约 `isTriggerExportable`——非 on_use 行为不生成右键代码，明确报告丢失 | ExportEquivalenceMatrixTest#mixedTriggerExportOnlyImplementsOnUse |
+| 3 | 物品属性、周期方块行为静默丢失 | ModExporter.capabilityReportOf | 属性 Map 与 PERIODIC 方块显式进入 lost 报告 | #itemAttributesSurfaceInReport / #periodicBlockCannotExportEquivalently |
+| 4 | 玩家/AI 文本可注入生成 Java（`effect` 参数逃逸字符串） | TemplateProjectGenerator apply_effect | `sanitizeEffectId`（只留 [a-z0-9_]）+ `sanitizePositiveInt`（范围拒绝） | #maliciousParamsCannotBreakGeneratedCode（注入代码被清除） |
+| 5 | ID 可通过路径段逃逸资源目录（`worldforge:../../evil` 过验证器） | ModExporter.nativeItemId + validateIdSafety | 原始 ID 段检查拒绝 `..`/`.`/绝对路径；nativeItemId 防御性规范化 | #nativeIdRejectsPathTraversalSegments 等 3 项 |
+| 6 | ExportPlan 内部 Map/List 仍可变（attributes 用 LinkedHashMap） | ExportPlan.deepCopy | Map.copyOf 冻结 + freezeParamValue 递归冻结，嵌套/越界参数创建时拒绝 | ExportPlanDeepImmutabilityTest 4 项 |
+| 7 | 执行器允许未确认降级导出（GUI-only 拦截） | ExportExecutor.doExport | `degradedGuardError` 执行器自检——lost 非空且未确认直接 FAILED | #executorRejectsUnconfirmedDegradedPlans |
+| 8 | Linux/macOS 会错误选择 gradlew.bat（文件存在优先于 OS） | ExportExecutor.buildCommand | `gradleCommandFor(os, …)` 纯决策函数——Windows 用 .bat，Linux/macOS 用 gradlew | #gradleCommandPrefersPlatformWrapper |
+
+### 其他可靠性
+
+- **AgentBridge 配置热更新**：reloadConfig 现在先 cancelAll+shutdown 旧 provider 再替换，杜绝在途请求用旧凭证
+- **构建日志取尾部**：错误消息保留最后 4000 字符（头部截断曾掩盖真实错误——隔离验收排查中实锤）
+- **导出构建 `--no-daemon -x runGameTest`**：不再在玩家机器上启动第二个 Minecraft，daemon 常驻内存减半（页面文件耗尽的机器上 daemon 无法启动——隔离验收实锤并修复）
+- 导出模板与 WorldForge 自身 gameTest JVM 均限 1G
+
+### 环境限制（如实记录）
+
+- **Linux/macOS 独立构建**：本机 WSL 无发行版且安装需重启，Docker 不可用——gradleCommandFor 决策函数已单元测试覆盖（Windows 实测 gradlew.bat 构建通过），Linux/macOS 实机构建**未验证**，标记为公测待验证项
+- Windows 11 隔离导出：51/51 通过（含真实 JAR 构建）
+- 本机后期系统提交内存被第三方进程（TTS server 12.7GB）耗尽，WorldForge 自身 GameTest 在最终复跑时因 `commit_memory` 失败受阻——非代码缺陷，早前同版本测试 61/61 已通过
+
+### 验证汇总
+
+- JUnit 179 项（+18 安全/等价测试，最终复跑全绿）
+- GameTest 61/61（最终复跑受系统内存阻塞，此前多轮通过）
+- Standalone GameTest 8/8
+- Windows 隔离实例 51/51（真实构建 auto_mod-1.0.1.jar）
+
+---
+
 ## v0.5.4 已发布 — 公测准备：快照一致性、取消语义与真实安装验收
 
 ### 第一阶段：源码审查修复

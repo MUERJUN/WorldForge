@@ -7,14 +7,14 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 - 游戏版本：Minecraft Java **1.21.1**
 - 加载器：Fabric Loader **0.16.9** + Fabric API **0.116.5+1.21.1**
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**
-- 当前版本：**v0.5.4 已发布**（公测准备 — 快照一致性、取消语义与真实安装验收）
+- 当前版本：**v0.5.5 已发布**（安全修复与跨平台构建）
 
 ---
 
 ## 快速开始
 
 ```bash
-./gradlew build           # 编译 + JUnit 163 项
+./gradlew build           # 编译 + JUnit 181 项
 ./gradlew runGameTest     # 真实服务端 GameTest 61 项
 ./gradlew runClient       # 进游戏：按 K 打开 Studio
 ```

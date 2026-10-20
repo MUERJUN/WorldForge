@@ -97,19 +97,72 @@ public record ExportPlan(
 		for (var b : def.behaviors()) {
 			behaviors.add(deepCopy(b));
 		}
+		// v0.5.5: attributes frozen via Map.copyOf (mutation rejected)
 		Map<String, Double> attributes = def.attributes() == null
 				? Map.of()
-				: new LinkedHashMap<>(def.attributes());
+				: Map.copyOf(def.attributes());
 		return new ItemDefinition(def.version(), def.id(), def.name(),
 				def.description(), def.texture(), attributes, List.copyOf(behaviors));
 	}
 
 	private static BehaviorDefinition deepCopy(BehaviorDefinition b) {
-		Map<String, Object> params = b.parameters() == null
-				? Map.of()
-				: new LinkedHashMap<>(b.parameters());
+		// v0.5.5: params are recursively frozen — Map.copyOf rejects mutation
+		// AND strips any nested mutable collections by refusing them outright
+		Map<String, Object> raw = b.parameters() == null ? Map.of() : b.parameters();
+		Map<String, Object> frozen = new LinkedHashMap<>();
+		for (var e : raw.entrySet()) {
+			frozen.put(e.getKey(), freezeParamValue(e.getKey(), e.getValue()));
+		}
 		return new BehaviorDefinition(b.trigger(),
-				List.copyOf(b.actions()), params, b.cooldownTicks());
+				List.copyOf(b.actions()), Map.copyOf(frozen), b.cooldownTicks());
+	}
+
+	/**
+	 * v0.5.5: a parameter value is exportable only when it is a scalar
+	 * (String / Number / Boolean) — those are immutable and safe to freeze.
+	 * Anything else (List/Map/nested structures) cannot be guaranteed
+	 * equivalent in generated code, so the plan creation rejects it loudly.
+	 *
+	 * <p>Known numeric parameters are validated HERE at plan creation —
+	 * out-of-range/negative values fail fast instead of poisoning a build
+	 * minutes later on a background thread.</p>
+	 */
+	private static Object freezeParamValue(String key, Object v) {
+		if (v == null || v instanceof String || v instanceof Boolean) {
+			return v;
+		}
+		if (v instanceof Number n) {
+			// range-check known timing/level params at freeze time
+			switch (key) {
+				case "duration" -> {
+					int i = n.intValue();
+					if (i < 1 || i > 7_200_000) {
+						throw new IllegalArgumentException("参数 duration 超出范围 [1, 7200000]: " + i);
+					}
+					return i;
+				}
+				case "amplifier" -> {
+					int i = n.intValue();
+					if (i < 0 || i > 255) {
+						throw new IllegalArgumentException("参数 amplifier 超出范围 [0, 255]: " + i);
+					}
+					return i;
+				}
+				case "amount" -> {
+					int i = n.intValue();
+					if (i < 1 || i > 1000) {
+						throw new IllegalArgumentException("参数 amount 超出范围 [1, 1000]: " + i);
+					}
+					return i;
+				}
+				default -> {
+					return v;
+				}
+			}
+		}
+		throw new IllegalArgumentException(
+				"行为参数包含不支持的可变/嵌套类型 " + v.getClass().getSimpleName()
+						+ "（值: " + v + "）。导出仅支持字符串、数字和布尔值参数。");
 	}
 
 	// (BlockDefinition carries only immutable scalars + behavior list; the

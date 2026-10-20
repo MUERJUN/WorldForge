@@ -1,4 +1,4 @@
-# WorldForge 公测指南（v0.5.4）
+# WorldForge 公测指南（v0.5.5）
 
 > 一个 JAR 装进游戏，在 Minecraft 里创建、测试、导出真正可用的独立 Mod。
 
@@ -19,7 +19,7 @@
 1. 安装 [Fabric Loader](https://fabricmc.net/use/installer/)，选择 1.21.1。
 2. 把两个 JAR 放进 `.minecraft/mods/`：
    - `fabric-api-0.116.5+1.21.1.jar`
-   - `worldforge-0.5.4.jar`
+   - `worldforge-0.5.5.jar`
 3. 启动游戏。进世界后按 **K** 打开 WorldForge Studio。
 
 ## 5 分钟上手：造一把会召唤闪电的雷霆之剑
@@ -43,14 +43,18 @@ Studio → 「AI 设置」→ 填入服务商（DeepSeek / OpenAI 兼容）、UR
 - **治疗**、**点燃**、**音效**、**粒子**
 - **冷却时间**（per-player / per-block-instance，存档重启后保持，破坏方块即重置）
 - 贴图（原版贴图映射）、语言文件、工具提示
+- **右键触发**（on_use）的行为完整导出
 
-### ⚠️ 导出时明确警告（需要确认）
-- AI 属性数值（攻击力/护甲等）→ 转换为基础行为描述
-- 复合触发条件 → 保留主要行为
+### ⚠️ 导出时明确警告（需要确认，能力报告中列出）
+- 物品属性数值（攻击力/护甲等）→ 报告为"没有等价实现"
+- 周期方块（定时产出）→ 报告为"没有等价实现"
 
 ### ❌ 当前不支持（导出时明确列出，绝不静默丢弃）
 - 动态实体、任意脚本/Java 执行
+- 非 right-click 触发器（hit_entity / left_click 等——不会并入右键，明确报告为丢失）
+- `experience`、`give_item` 动作（尚无代码生成实现）
 - WorldForge 运行时专有 API
+- 行为参数仅支持字符串/数字/布尔；嵌套结构在创建方案时拒绝
 
 ## 导出构建说明
 

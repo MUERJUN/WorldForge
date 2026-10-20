@@ -2,6 +2,7 @@ package dev.worldforge.exporter;
 
 import dev.worldforge.definition.ItemDefinition;
 import dev.worldforge.block.BlockDefinition;
+import dev.worldforge.exporter.ModExporter;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -402,6 +403,12 @@ public final class TemplateProjectGenerator {
 				    }
 				}
 
+				// v0.5.5: cap the gameTest JVM — inside a running Minecraft
+				// client the page file cannot back another default-sized JVM
+				tasks.named('runGameTest') {
+				    jvmArgs '-Xmx512m'
+				}
+
 				repositories {
 				    mavenCentral()
 				    maven { url = 'https://maven.fabricmc.net/' }
@@ -533,8 +540,11 @@ public final class TemplateProjectGenerator {
 
 	private void writeGradleProperties() throws IOException {
 		Files.writeString(root.resolve("gradle.properties"), """
-				org.gradle.jvmargs=-Xmx2G
-				org.gradle.parallel=true
+				# v0.5.5: modest heap + no parallel daemons — the export build often
+				# runs INSIDE a running Minecraft client where the page file is
+				# nearly exhausted; a 2G daemon fails to start (commit charge).
+				org.gradle.jvmargs=-Xmx1G
+				org.gradle.parallel=false
 
 				minecraft_version=1.21.1
 				yarn_mappings=1.21.1+build.3
@@ -694,18 +704,19 @@ public final class TemplateProjectGenerator {
 		sb.append("\t\t\treturn TypedActionResult.pass(stack);\n");
 		sb.append("\t\t}\n");
 
-		// Generate action code for each behavior
+		// Generate action code for each behavior.
+		// v0.5.5: only behaviors whose TRIGGER is the exported one (right-click
+		// use) generate code here — hit_entity and other triggers must not be
+		// folded into use(); they are reported lost via the capability report.
 		for (var behavior : def.behaviors()) {
+			if (!ModExporter.isTriggerExportable(behavior.trigger())) continue;
 			for (String action : behavior.actions()) {
 				generateItemActionCode(sb, action, behavior);
 			}
 		}
-
 		sb.append("\t\tLAST_USE.put(player.getUuid(), now);\n");
 		sb.append("\t\treturn TypedActionResult.success(stack);\n");
 		sb.append("\t}\n");
-
-		// Override useOnBlock() — right click on block
 		sb.append("\n\t@Override\n");
 		sb.append("\tpublic ActionResult useOnBlock(ItemUsageContext context) {\n");
 		sb.append("\t\tif (context.getWorld().isClient()) return ActionResult.PASS;\n");
@@ -718,6 +729,7 @@ public final class TemplateProjectGenerator {
 		sb.append("\t\t\treturn ActionResult.PASS;\n");
 		sb.append("\t\t}\n");
 		for (var behavior : def.behaviors()) {
+			if (!ModExporter.isTriggerExportable(behavior.trigger())) continue;
 			for (String action : behavior.actions()) {
 				generateItemActionCode(sb, action, behavior);
 			}
@@ -744,9 +756,11 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\t}\n");
 			}
 			case "apply_effect" -> {
-				var effectName = behavior.parameters().getOrDefault("effect", "speed").toString();
-				var duration = behavior.parameters().getOrDefault("duration", 200);
-				var amplifier = behavior.parameters().getOrDefault("amplifier", 0);
+				var effectName = ModExporter.sanitizeEffectId(behavior.parameters().getOrDefault("effect", "speed").toString());
+				var duration = ModExporter.sanitizePositiveInt("duration",
+						behavior.parameters().getOrDefault("duration", 200), 1, 7_200_000);
+				var amplifier = ModExporter.sanitizePositiveInt("amplifier",
+						behavior.parameters().getOrDefault("amplifier", 0), 0, 255);
 				sb.append("\t\t{\n");
 				sb.append("\t\t\tvar effect = net.minecraft.registry.Registries.STATUS_EFFECT\n");
 				sb.append("\t\t\t\t\t.getEntry(net.minecraft.util.Identifier.of(\"minecraft:").append(effectName).append("\")).orElse(null);\n");
@@ -757,7 +771,8 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\t}\n");
 			}
 			case "heal" -> {
-				var amount = behavior.parameters().getOrDefault("amount", 10);
+				var amount = ModExporter.sanitizePositiveInt("amount",
+				behavior.parameters().getOrDefault("amount", 10), 1, 1000);
 				sb.append("\t\tplayer.heal(").append(amount).append("f);\n");
 			}
 			case "ignite" -> {
@@ -884,8 +899,10 @@ public final class TemplateProjectGenerator {
 		sb.append("\t\t\treturn ActionResult.PASS;\n");
 		sb.append("\t\t}\n");
 
-		// Generate action code for each behavior
+		// Generate action code for each behavior — only right-click triggers
+		// (v0.5.5 trigger contract; block right-click == on_use)
 		for (var behavior : def.behaviors()) {
+			if (!ModExporter.isTriggerExportable(behavior.trigger())) continue;
 			for (String action : behavior.actions()) {
 				generateBlockActionCode(sb, action, behavior);
 			}
@@ -981,9 +998,11 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\t}\n");
 			}
 			case "apply_effect" -> {
-				var effectName = behavior.parameters().getOrDefault("effect", "speed").toString();
-				var duration = behavior.parameters().getOrDefault("duration", 200);
-				var amplifier = behavior.parameters().getOrDefault("amplifier", 0);
+				var effectName = ModExporter.sanitizeEffectId(behavior.parameters().getOrDefault("effect", "speed").toString());
+				var duration = ModExporter.sanitizePositiveInt("duration",
+						behavior.parameters().getOrDefault("duration", 200), 1, 7_200_000);
+				var amplifier = ModExporter.sanitizePositiveInt("amplifier",
+						behavior.parameters().getOrDefault("amplifier", 0), 0, 255);
 				sb.append("\t\tif (player != null) {\n");
 				sb.append("\t\t\tvar effect = net.minecraft.registry.Registries.STATUS_EFFECT\n");
 				sb.append("\t\t\t\t\t.getEntry(net.minecraft.util.Identifier.of(\"minecraft:").append(effectName).append("\")).orElse(null);\n");
@@ -994,7 +1013,8 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\t}\n");
 			}
 			case "heal" -> {
-				var amount = behavior.parameters().getOrDefault("amount", 10);
+				var amount = ModExporter.sanitizePositiveInt("amount",
+				behavior.parameters().getOrDefault("amount", 10), 1, 1000);
 				sb.append("\t\tif (player != null) player.heal(").append(amount).append("f);\n");
 			}
 			case "ignite" -> {

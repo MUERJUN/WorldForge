@@ -95,11 +95,26 @@ public class ExportExecutor {
 	 * Run the full export synchronously from the plan. Call from a background thread.
 	 */
 	public ModExporter.ExportResult doExport() {
+		// 0) v0.5.5 core degraded guard — the executor refuses unconfirmed
+		// capability loss itself; the GUI check is convenience, not the boundary.
+		var degradedError = ModExporter.degradedGuardError(plan.report(), plan.degradedExportConfirmed());
+		if (degradedError != null) {
+			return finish(TerminalState.FAILED, false, null, null, degradedError, plan.report().lost());
+		}
+
 		// 1) validate plan metadata (no runtime lookups — pure plan data)
 		var errors = ModExporter.validatePlanShape(plan);
 		if (!errors.isEmpty()) {
 			return finish(TerminalState.FAILED, false, null, null,
 					"校验失败: " + String.join("; ", errors), plan.report().lost());
+		}
+		// v0.5.5: unsafe resource-path ids can never export
+		var idErrors = ModExporter.validateIdSafety(
+				plan.items().stream().map(dev.worldforge.definition.ItemDefinition::id).toList(),
+				plan.blocks().stream().map(dev.worldforge.block.BlockDefinition::id).toList());
+		if (!idErrors.isEmpty()) {
+			return finish(TerminalState.FAILED, false, null, null,
+					"校验失败: " + String.join("; ", idErrors), plan.report().lost());
 		}
 
 		var warnings = new ArrayList<>(plan.report().lost());
@@ -241,18 +256,31 @@ public class ExportExecutor {
 	}
 
 	/**
-	 * The subprocess command that builds the project. Protected so tests can
-	 * substitute a fake fast/slow build script (no real Gradle needed).
+	 * The subprocess command that builds the project.
+	 * v0.5.5: wrapper choice follows the OS — Windows uses gradlew.bat,
+	 * Linux/macOS use gradlew — never file-existence order (both files are
+	 * always present after copyGradleWrapper). Falls back to the other
+	 * wrapper, then system gradle.
 	 */
 	protected List<String> buildCommand(Path projectDir) {
 		var gradlew = projectDir.resolve("gradlew").toAbsolutePath();
 		var gradleBat = projectDir.resolve("gradlew.bat").toAbsolutePath();
-		if (Files.exists(gradleBat)) {
-			return List.of(gradleBat.toString(), "build", "--console=plain");
-		} else if (Files.exists(gradlew)) {
-			return List.of(gradlew.toString(), "build", "--console=plain");
-		}
-		return List.of("gradle", "build", "--console=plain");
+		boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
+		var choice = ModExporter.gradleCommandFor(windows,
+				Files.exists(gradleBat), Files.exists(gradlew));
+		// v0.5.5: 'build' minus runGameTest — the exported JAR must build on a
+		// player machine without launching a second Minecraft (memory-safe
+		// inside a running client; gameTests are run by the dev workflow).
+		// --no-daemon: single short-lived JVM — a resident daemon doubles the
+		// commit charge and fails on memory-tight player machines.
+		return switch (choice) {
+			case "bat" -> List.of(gradleBat.toString(), "build", "-x", "runGameTest",
+					"--no-daemon", "--console=plain");
+			case "sh" -> List.of(gradlew.toString(), "build", "-x", "runGameTest",
+					"--no-daemon", "--console=plain");
+			default -> List.of("gradle", "build", "-x", "runGameTest",
+					"--no-daemon", "--console=plain");
+		};
 	}
 
 	/**
@@ -296,7 +324,11 @@ public class ExportExecutor {
 		if (exit != 0) {
 			String tail;
 			synchronized (output) {
-				tail = output.substring(0, Math.min(output.length(), 2000));
+				// v0.5.5: keep the LAST 4000 chars — the real error (remap
+				// crash, OOM, gameTest failure) sits at the end of the log;
+				// head-truncation hid it entirely in earlier investigations.
+				int len = output.length();
+				tail = output.substring(Math.max(0, len - 4000), len);
 			}
 			throw new RuntimeException("Gradle exit " + exit + ":\n" + sanitizeLog(tail));
 		}
