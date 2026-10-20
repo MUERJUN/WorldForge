@@ -163,10 +163,9 @@ public final class ExportSymbolMapper {
 	// ------------------------------------------------------------ package name
 
 	/**
-	 * Java package from mod id: '_' runs collapse to single '_' (a legal
-	 * package char), so 'a_' -> 'a_' and 'a__b' -> 'a_b' — never 'a.'/'a..b'.
-	 * Returns an empty string result is rejected upstream; here we always
-	 * produce a legal single-or-more segment package.
+	 * Java package from mod id: split on '_' into package segments, empty
+	 * segments dropped (so 'a_' -> 'a', 'a__b' -> 'a.b', never 'a.'/'a..b'),
+	 * joined with '.'. 'my_mod' -> 'my.mod' — matches the historical layout.
 	 */
 	public static String packageName(String modId) {
 		if (modId == null || modId.isBlank()) {
@@ -181,7 +180,7 @@ public final class ExportSymbolMapper {
 			throw new IllegalArgumentException(
 					"Mod ID '" + modId + "' 无法生成合法 Java 包名（仅含下划线）");
 		}
-		return String.join("_", segs);
+		return String.join(".", segs);
 	}
 
 	// ------------------------------------------------------------ resource path
@@ -199,10 +198,28 @@ public final class ExportSymbolMapper {
 	// ------------------------------------------------------------ strict params
 
 	/**
-	 * v0.5.6 P0-2: STRICT effect id validation — rejects instead of rewriting.
-	 * Accepts bare minecraft effect ids ([a-z0-9_]+); a namespaced value is
-	 * rejected with an explicit namespace explanation because the template can
-	 * only hardcode minecraft:.
+	 * v0.5.7 P1-1: the exact set of vanilla status effects in Minecraft
+	 * 1.21.1 (extracted from StatusEffects of the 1.21.1 merged jar — not
+	 * from memory). An effect outside this set cannot be honoured by the
+	 * exported code (getEntry would return empty and the behavior would
+	 * silently do nothing while still claiming SUCCESS) — reject at plan
+	 * creation instead.
+	 */
+	public static final java.util.Set<String> VANILLA_EFFECTS_1_21_1 = java.util.Set.of(
+			"speed", "slowness", "haste", "mining_fatigue", "strength",
+			"instant_health", "instant_damage", "jump_boost", "nausea",
+			"regeneration", "resistance", "fire_resistance", "water_breathing",
+			"invisibility", "blindness", "night_vision", "hunger", "weakness",
+			"poison", "wither", "health_boost", "absorption", "saturation",
+			"glowing", "levitation", "luck", "unluck", "slow_falling",
+			"conduit_power", "dolphins_grace", "bad_omen", "hero_of_the_village",
+			"darkness", "trial_omen", "raid_omen", "wind_charged", "weaving",
+			"oozing", "infested");
+
+	/**
+	 * v0.5.6 P0-2 / v0.5.7 P1-1: STRICT effect id validation — rejects
+	 * instead of rewriting, and now also rejects syntactically-valid ids
+	 * that are not real 1.21.1 vanilla effects.
 	 */
 	public static String strictEffectId(String raw) {
 		if (raw == null || raw.isBlank()) {
@@ -217,6 +234,11 @@ public final class ExportSymbolMapper {
 		if (!raw.matches("[a-z0-9_]+")) {
 			throw new IllegalArgumentException(
 					"状态效果 ID '" + raw + "' 含不合法字符（仅允许小写字母、数字、下划线）");
+		}
+		if (!VANILLA_EFFECTS_1_21_1.contains(raw)) {
+			throw new IllegalArgumentException(
+					"状态效果 '" + raw + "' 不是 Minecraft 1.21.1 的原版效果，无法等价导出"
+					+ "（原版效果示例: speed, strength, fire_resistance, poison）");
 		}
 		return raw;
 	}

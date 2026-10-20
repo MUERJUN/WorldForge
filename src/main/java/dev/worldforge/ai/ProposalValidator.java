@@ -39,7 +39,7 @@ public final class ProposalValidator {
 		}
 	}
 
-	private static final Pattern ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_.-/]{1,128}");
+	private static final Pattern ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_./-]{1,128}");
 	private static final List<String> TRIGGERS = List.of("right_click", "hit_entity");
 	private static final List<String> ACTIONS = List.of(
 			"summon_lightning", "apply_effect", "heal", "experience", "teleport", "explosion", "ignite");

@@ -1,5 +1,71 @@
 # 更新日志
 
+## v0.5.7 已发布 — 公测候选质量门禁
+
+### P0-1: ExportSymbolMapper 全面接通
+
+- **修复前证据**：`a_` 生成非法包 `a.`、`a__b` 生成 `a..b`（`replace("_", ".")` 散落 12 处）——`SymbolTableWiringTest` 修复前 3 项失败
+- 生成器所有包名/目录/入口统一来自构造时冻结的 `pkg`（`ExportSymbolMapper.packageName`）；`mainClassName` 改走 `identifierBase`
+- 目录路径 == 声明 package == fabric.mod.json 入口类（三重一致性测试）
+- 附带修复：ID 验证正则 `[a-z0-9_.-/]` 中 `-/` 被解析为字符范围导致**连字符 ID 全部被拒**（4 处）——连字符是 Minecraft 合法 ID 字符
+
+### P0-2: 两阶段 Preflight → Commit
+
+- `generate()` 第一阶段解析全部定义、注册全部符号、检测折叠冲突/大小写不敏感文件名冲突/保留名冲突/注册 ID 冲突——**任何文件写入之前**
+- 修复前证据：冲突检测在写文件之后（v0.5.6 遗留）；`ConflictBeforeWriteTest` 断言失败后项目目录零 .java 文件
+- 折叠冲突确定性消歧：`a-b`/`a_b`/`a.b` → `A`/`A_2`/`A_3`，冲突记录可审计
+- 附带修复：`DefinitionStore`/`BlockDefinitionStore` rename 被 Windows TEMP junction 拒绝时降级 copy+delete（保留真实磁盘故障信号——3 个磁盘失败 GameTest 验证未回归）
+
+### P1-1: 效果 ID 语义有效性
+
+- `strictEffectId` 现验证效果**真实存在于 1.21.1**（白名单从合并 jar 的 StatusEffects 提取，39 项，非记忆）
+- 格式合法但不存在的效果（`flying_machine`）在方案创建时拒绝并说明——不再可能生成"效果为空仍返回 SUCCESS 并开始冷却"
+- 测试：speed/strength/fire_resistance/instant_health 接受；虚构/空/命名空间/注入/大写拒绝；集合数量断言
+
+### P1-2: 能力报告单一核心
+
+- 旧 `buildCapabilityReport(ExportRequest)` 标记 @Deprecated 并**委托** `capabilityReportOf`（旧核心缺 converted/触发器/属性/周期核算——与新核心不一致的根源）
+- GUI/ExportPlan/Executor 全部读同一冻结 `plan.report()`（assertSame 身份验证）
+- `CapabilityReportConsistencyTest` 4 项：复杂对象三桶分流、旧 API 与新核心逐字段相等、执行器守卫引用冻结清单
+
+### P1-3: 三个真实导出回归（全部真实 Gradle 构建 + 真实 Fabric 加载）
+
+| 工程 | 内容 | 构建 | GameTest |
+|------|------|------|----------|
+| alpha_mod | 雷霆剑+交互方块（基线） | ✅ | 8/8 |
+| beta_mod | `magic-sword`/`magic.device`/`magic__core`/`power.block`/`spark_stone` 多物品多方块非默认参数 | ✅ | **11/11** |
+| gamma_mod | 含不支持动作 `fly` 的降级方案（确认后导出） | ✅ | 5/5 |
+
+- JAR 内容审计：0 WorldForge 引用、0 密钥、fabric.mod.json 入口类与 jar 内 class 一致、依赖仅 fabricloader/minecraft/java/fabric-api
+- 脚本：`scripts/build-three-projects.sh`（Windows/Linux 通用）
+
+### P1-4: 文档完整性
+
+- 恢复被 v0.5.6 贪婪正则吞掉的 README 快速开始章节（面向玩家的 GitHub Release 安装 + K 键 + 开发者构建）
+- `sync-version-docs.py` 重写：仅行级替换 + 必需章节完整性门（缺失即 exit≠0 且不写文件）
+- `DocsIntegrityTest` 4 项：快速开始/玩家旅程/版本一致性/脚本门
+
+### P2: Linux 验证
+
+- 新增 `.github/workflows/linux-export-build.yml`：ubuntu-latest + Temurin 21 + 空白 GRADLE_USER_HOME + 无系统 Gradle——生成三工程→Linux `./gradlew build`→Linux `runGameTest` 真实加载
+- 本机 WSL 无发行版（安装需重启）——Linux 实测移交 CI，**在 CI 首次运行通过前仍标记为未验证**
+- macOS：无环境，继续标记未验证
+
+### 验证汇总
+
+| 项目 | 结果 |
+|------|------|
+| JUnit | 230/230（+28） |
+| WorldForge GameTest | 61/61 |
+| 独立 Mod GameTest | 8/8 |
+| 三工程真实构建（Windows） | 3/3 + GameTest 8/8、11/11、5/5 |
+| Windows 11 隔离客户端 | 51/51（真实 JAR 构建） |
+| Linux 实机构建 | CI 待运行（本机 WSL 需重启） |
+| macOS | 未验证（无环境） |
+| JAR | worldforge-0.5.7.jar · SHA-256 6b45c784d6e562c0… |
+
+---
+
 ## v0.5.6 已发布 — 符号映射、严格校验与热更新隔离
 
 ### P0-1: ExportSymbolMapper 统一符号映射

@@ -27,6 +27,6 @@ public record VirtualId(String id) {
 
 	public boolean isValidSyntax() {
 		return id != null && !id.isBlank()
-				&& id.matches("[a-z0-9_.-/]+:[a-z0-9_.-/]+");
+				&& id.matches("[a-z0-9_.-]+:[a-z0-9_./-]+");
 	}
 }

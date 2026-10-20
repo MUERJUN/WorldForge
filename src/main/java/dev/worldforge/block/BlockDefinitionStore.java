@@ -40,7 +40,7 @@ public final class BlockDefinitionStore {
 
 	public static final int FILE_VERSION = 1;
 	private static final String FILE_NAME = "blocks.json";
-	private static final Pattern ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_.-/]{1,128}");
+	private static final Pattern ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_./-]{1,128}");
 
 	private final Path dir;
 	private volatile String lastError = "";
@@ -196,7 +196,16 @@ public final class BlockDefinitionStore {
 		try {
 			Files.createDirectories(dir);
 			Files.writeString(tmp, root.toString(), StandardCharsets.UTF_8);
-			Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+			try {
+				Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+			} catch (IOException moveFailure) {
+				// v0.5.7: rename refused (Windows temp junctions) — copy+delete
+				Files.copy(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+				try {
+					Files.deleteIfExists(tmp);
+				} catch (IOException ignored) {
+				}
+			}
 			lastError = "";
 			return true;
 		} catch (IOException e) {

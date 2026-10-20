@@ -32,12 +32,82 @@ public final class TemplateProjectGenerator {
 		this.req = req;
 		this.root = root;
 		this.resolver = resolver;
+		this.symbols = ExportSymbolMapper.create();
+		this.pkg = ExportSymbolMapper.packageName(req.modId());
 	}
 
+	/**
+	 * v0.5.7 P0-2: two-phase generation.
+	 *
+	 * <p>Phase 1 (preflight): resolve every definition, compute ALL symbols
+	 * (class names, field names, registry ids, resource paths, the package,
+	 * the main class), and run every conflict / reserved-name / case-insensitive
+	 * collision / path-boundary check — BEFORE a single byte is written.</p>
+	 *
+	 * <p>Phase 2 (commit): only after preflight passes, write all files using
+	 * the frozen symbol results. A failure here leaves only an obviously
+	 * incomplete project directory (the executor deletes artifacts), never a
+	 * half-mapped one.</p>
+	 */
 	public void generate() throws IOException {
-		// directory structure
-		var src = root.resolve("src/main/java/" + req.modId().replace("_", "/"));
 		var res = root.resolve("src/main/resources");
+		// ---------- phase 1: preflight ----------
+		var itemDefs = new java.util.ArrayList<ItemDefinition>();
+		for (String id : req.itemIds()) {
+			ItemDefinition def = resolver.getItem(id);
+			if (def == null) continue;
+			itemDefs.add(def);
+			symbols.registerClass(def.id());
+			symbols.registerField(def.id());
+		}
+		var blockDefs = new java.util.ArrayList<BlockDefinition>();
+		for (String id : req.blockIds()) {
+			BlockDefinition def = resolver.getBlock(id);
+			if (def == null) continue;
+			blockDefs.add(def);
+			symbols.registerClass(def.id());
+			symbols.registerField(def.id());
+		}
+		// v0.5.7: registry-id (item vs BlockItem) conflicts are validated by
+		// ExportExecutor.validatePlanShape BEFORE generate() runs — here we
+		// only enforce the Java-symbol collisions the mapper detected.
+		if (symbols.hasConflict()) {
+			throw new IllegalArgumentException(
+					"导出符号冲突，无法安全生成：\n" + String.join("\n", symbols.conflicts()));
+		}
+		// final generated class names (base + suffix) must be unique AND
+		// case-insensitively distinct — Windows/macOS default filesystems
+		// fold case and would silently overwrite a source file.
+		var finalClasses = new java.util.HashSet<String>();
+		var ciSeen = new java.util.HashSet<String>();
+		finalClasses.add(mainClassName());
+		for (var def : itemDefs) finalClasses.add(itemClassName(def));
+		for (var def : blockDefs) {
+			finalClasses.add(blockClassName(def));
+			if (!def.behaviors().isEmpty()) finalClasses.add(blockClassName(def) + "Entity");
+		}
+		for (var cls : finalClasses) {
+			var key = (cls + ".java").toLowerCase(java.util.Locale.ROOT);
+			if (!ciSeen.add(key)) {
+				throw new IllegalArgumentException(
+						"文件名大小写冲突（Windows/macOS 文件系统无法共存）: " + cls);
+			}
+			// reserved generator machinery names
+			if (cls.equals("ModItems") || cls.equals("ModBlocks") || cls.equals("ExportedModTest")
+					|| cls.equals(mainClassName())) {
+				// ModItems/ModBlocks/ExportedModTest are written by the
+				// generator itself; a user class colliding with them would be
+				// overwritten — reject.
+				if (!cls.equals(mainClassName())) {
+					throw new IllegalArgumentException(
+							"生成类名与模板保留名冲突: " + cls + "（请修改物品/方块 ID）");
+				}
+			}
+		}
+
+		// ---------- phase 2: commit ----------
+		// directory structure
+		var src = root.resolve("src/main/java/" + pkg.replace(".", "/"));
 		Files.createDirectories(src);
 		Files.createDirectories(res);
 
@@ -50,19 +120,13 @@ public final class TemplateProjectGenerator {
 
 		// Java source
 		writeMainClass(src);
-		if (!req.itemIds().isEmpty()) {
+		if (!itemDefs.isEmpty()) {
 			writeModItems(src);
-			for (String id : req.itemIds()) {
-				ItemDefinition def = resolver.getItem(id);
-				if (def != null) writeCustomItem(src, def);
-			}
+			for (var def : itemDefs) writeCustomItem(src, def);
 		}
-		if (!req.blockIds().isEmpty()) {
+		if (!blockDefs.isEmpty()) {
 			writeModBlocks(src);
-			for (String id : req.blockIds()) {
-				BlockDefinition def = resolver.getBlock(id);
-				if (def != null) writeCustomBlock(src, def);
-			}
+			for (var def : blockDefs) writeCustomBlock(src, def);
 		}
 
 		// resources
@@ -71,17 +135,10 @@ public final class TemplateProjectGenerator {
 
 		// GameTest that verifies items/blocks are registered at runtime
 		writeGameTest(src, res);
-
-		// v0.5.6: symbol conflicts between distinct ids are fatal — files may
-		// already reference the disambiguated names, so refuse the export here
-		if (symbols.hasConflict()) {
-			throw new IllegalArgumentException(
-					"导出符号冲突，无法安全生成：\n" + String.join("\n", symbols.conflicts()));
-		}
 	}
 
 	private void writeGameTest(Path src, Path res) throws IOException {
-		var pkg = req.modId().replace("_", ".");
+		
 		var sb = new StringBuilder();
 		sb.append("package ").append(pkg).append(";\n\n");
 		sb.append("import net.minecraft.entity.Entity;\n");
@@ -380,9 +437,9 @@ public final class TemplateProjectGenerator {
 		var modJson = Files.readString(modJsonPath);
 		if (!modJson.contains("fabric-gametest")) {
 			modJson = modJson.replace(
-					"\"main\": [\"" + req.modId().replace("_", ".") + "." + mainClassName() + "\"]",
-					"\"main\": [\"" + req.modId().replace("_", ".") + "." + mainClassName() + "\"],\n"
-					+ "        \"fabric-gametest\": [\"" + req.modId().replace("_", ".") + ".ExportedModTest\"]");
+					"\"main\": [\"" + pkg + "." + mainClassName() + "\"]",
+					"\"main\": [\"" + pkg + "." + mainClassName() + "\"],\n"
+					+ "        \"fabric-gametest\": [\"" + pkg + ".ExportedModTest\"]");
 			Files.writeString(modJsonPath, modJson);
 		}
 	}
@@ -611,14 +668,14 @@ public final class TemplateProjectGenerator {
 				""".formatted(
 				req.modId(),
 				escapeJson(req.modName()),
-				req.modId().replace("_", "."),
+				pkg,
 				mainClassName());
 		Files.createDirectories(res);
 		Files.writeString(res.resolve("fabric.mod.json"), json);
 	}
 
 	private void writeMainClass(Path src) throws IOException {
-		var pkg = req.modId().replace("_", ".");
+		
 		var sb = new StringBuilder();
 		sb.append("package ").append(pkg).append(";\n\n");
 		sb.append("import net.fabricmc.api.ModInitializer;\n");
@@ -646,7 +703,7 @@ public final class TemplateProjectGenerator {
 	}
 
 	private void writeModItems(Path src) throws IOException {
-		var pkg = req.modId().replace("_", ".");
+		
 		var sb = new StringBuilder();
 		sb.append("package ").append(pkg).append(";\n\n");
 		sb.append("import net.minecraft.entity.player.PlayerEntity;\n");
@@ -692,7 +749,7 @@ public final class TemplateProjectGenerator {
 	}
 
 	private void writeCustomItem(Path src, ItemDefinition def) throws IOException {
-		var pkg = req.modId().replace("_", ".");
+		
 		var className = itemClassName(def);
 		var sb = new StringBuilder();
 		sb.append("package ").append(pkg).append(";\n\n");
@@ -824,7 +881,7 @@ public final class TemplateProjectGenerator {
 	}
 
 	private void writeModBlocks(Path src) throws IOException {
-		var pkg = req.modId().replace("_", ".");
+		
 		var sb = new StringBuilder();
 		sb.append("package ").append(pkg).append(";\n\n");
 		sb.append("import net.minecraft.block.Block;\n");
@@ -871,7 +928,7 @@ public final class TemplateProjectGenerator {
 	}
 
 	private void writeCustomBlock(Path src, BlockDefinition def) throws IOException {
-		var pkg = req.modId().replace("_", ".");
+		
 		var className = blockClassName(def);
 		var entityName = className + "Entity";
 		writeBlockEntity(src, def);
@@ -951,7 +1008,7 @@ public final class TemplateProjectGenerator {
 	 * cooldown state with full NBT persistence.
 	 */
 	private void writeBlockEntity(Path src, BlockDefinition def) throws IOException {
-		var pkg = req.modId().replace("_", ".");
+		
 		var className = blockClassName(def);
 		var entityName = className + "Entity";
 		var beId = nativeBlockId(def.id()) + "_entity";
@@ -1122,12 +1179,9 @@ public final class TemplateProjectGenerator {
 	// ---- helpers ----
 
 	private String mainClassName() {
-		var parts = req.modId().split("_");
-		var sb = new StringBuilder();
-		for (var p : parts) {
-			if (!p.isEmpty()) sb.append(Character.toUpperCase(p.charAt(0))).append(p.substring(1));
-		}
-		return sb.toString() + "Mod";
+		// v0.5.7: route through the mapper's identifier base — no local
+		// PascalCase logic. 'my_mod' -> MyModMod, 'a__b' -> ABMod.
+		return ExportSymbolMapper.identifierBase(req.modId(), true) + "Mod";
 	}
 
 	private String nativeItemId(String worldForgeId) {
@@ -1143,7 +1197,9 @@ public final class TemplateProjectGenerator {
 	// deterministic, keyword-escaped, collision-checked. The mapper instance
 	// lives for the whole generate() run so cross-id conflicts are caught
 	// before any file is written.
-	private ExportSymbolMapper symbols = ExportSymbolMapper.create();
+	private final ExportSymbolMapper symbols;
+	/** v0.5.7: the ONE package for every generated java file + fabric entry. */
+	private final String pkg;
 
 	private String itemFieldName(ItemDefinition def) {
 		return symbols.registerField(def.id()) + "_ITEM";

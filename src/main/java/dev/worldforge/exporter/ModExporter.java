@@ -262,45 +262,28 @@ public final class ModExporter {
 	}
 
 	/**
-	 * Build a capability report for the export request.
-	 * Lists every behavior action and whether it is retained, converted, or lost.
+	 * @deprecated v0.5.7 P1-2: legacy per-request report. It now DELEGATES to
+	 * the single capability core {@link #capabilityReportOf} so old call sites
+	 * can never disagree with the plan-frozen report. New code must freeze an
+	 * ExportPlan and read plan.report().
 	 */
+	@Deprecated
 	public static CapabilityReport buildCapabilityReport(ExportRequest req) {
-		List<String> retained = new java.util.ArrayList<>();
-		List<String> converted = new java.util.ArrayList<>();
-		List<String> lost = new java.util.ArrayList<>();
-		for (String id : req.itemIds()) {
-			ItemDefinition def = WorldForgeRuntimeManager.get(id);
-			if (def == null) continue;
-			for (var b : def.behaviors()) {
-				for (String action : b.actions()) {
-					String desc = "item " + id + ": " + action + " (trigger=" + b.trigger() + ")";
-					if (isSupportedItemAction(action)) {
-						retained.add(desc);
-					} else {
-						lost.add(desc);
-					}
-				}
+		var items = new java.util.ArrayList<ItemDefinition>();
+		if (req.itemIds() != null) {
+			for (String id : req.itemIds()) {
+				var def = WorldForgeRuntimeManager.get(id);
+				if (def != null) items.add(def);
 			}
 		}
-		for (String id : req.blockIds()) {
-			BlockDefinition def = BlockRuntimeManager.get(id);
-			if (def == null) continue;
-			for (var b : def.behaviors()) {
-				for (String action : b.actions()) {
-					String desc = "block " + id + ": " + action + " (trigger=" + b.trigger() + ")";
-					if (isSupportedBlockAction(action)) {
-						retained.add(desc);
-					} else {
-						lost.add(desc);
-					}
-				}
+		var blocks = new java.util.ArrayList<BlockDefinition>();
+		if (req.blockIds() != null) {
+			for (String id : req.blockIds()) {
+				var def = BlockRuntimeManager.get(id);
+				if (def != null) blocks.add(def);
 			}
 		}
-		return new CapabilityReport(
-				java.util.List.copyOf(retained),
-				java.util.List.copyOf(converted),
-				java.util.List.copyOf(lost));
+		return capabilityReportOf(items, blocks);
 	}
 
 	/**

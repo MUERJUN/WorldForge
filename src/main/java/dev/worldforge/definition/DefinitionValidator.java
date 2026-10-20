@@ -30,7 +30,7 @@ public final class DefinitionValidator {
 
 		if (def.id() == null || def.id().isBlank()) {
 			errors.add("id must not be blank");
-		} else if (!def.id().matches("[a-z0-9_.-]+:[a-z0-9_.-/]+")) {
+		} else if (!def.id().matches("[a-z0-9_.-]+:[a-z0-9_./-]+")) {
 			errors.add("id must be a valid namespace:path (lowercase), got: " + def.id());
 		}
 

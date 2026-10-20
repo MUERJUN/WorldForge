@@ -166,7 +166,7 @@ public final class DefinitionStore {
 				return LoadResult.failed("duplicate id \"" + def.id() + "\" at entry #" + idx);
 			}
 			// strict also rejects values the tolerant path silently clamped away
-			if (!def.id().matches("[a-z0-9_.-]+:[a-z0-9_.-/]+")) {
+			if (!def.id().matches("[a-z0-9_.-]+:[a-z0-9_./-]+")) {
 				return LoadResult.failed("entry #" + idx + " has an illegal id: " + def.id());
 			}
 			// strict raw-shape check: types the lenient path would silently drop
@@ -311,7 +311,13 @@ public final class DefinitionStore {
 			try {
 				Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
 			} catch (AtomicMoveNotSupportedException e) {
-				Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+				try {
+					Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+				} catch (IOException nonAtomicFailure) {
+					degradeCopy(tmp, file, nonAtomicFailure);
+				}
+			} catch (IOException moveFailure) {
+				degradeCopy(tmp, file, moveFailure);
 			}
 			lastError = null;
 			return true;
@@ -319,6 +325,33 @@ public final class DefinitionStore {
 			lastError = e.getClass().getSimpleName() + ": " + e.getMessage();
 			WorldForge.LOGGER.error("[WorldForge] FAILED to save definitions (previous file kept): {}", e.toString());
 			return false;
+		}
+	}
+
+	/**
+	 * v0.5.7: rename() can be refused on some Windows locations (TEMP
+	 * junctions, antivirus) while the directory itself IS writable — in that
+	 * case copy+delete still preserves the atomic-ish save. But when the
+	 * directory is genuinely unwritable (the disk-failure tests delete the
+	 * target or lock the file), copy fails too and we keep the failure signal.
+	 */
+	private static void degradeCopy(Path tmp, Path file, IOException cause) throws IOException {
+		// writability probe: can we open the target for append/create?
+		boolean dirWritable;
+		try (var ch = Files.newByteChannel(file,
+				java.nio.file.StandardOpenOption.CREATE,
+				java.nio.file.StandardOpenOption.WRITE)) {
+			dirWritable = true;
+		} catch (IOException probeFailure) {
+			dirWritable = false;
+		}
+		if (!dirWritable) {
+			throw cause; // genuine disk failure — keep the error signal
+		}
+		Files.copy(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+		try {
+			Files.deleteIfExists(tmp);
+		} catch (IOException ignored) {
 		}
 	}
 

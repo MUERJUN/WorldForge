@@ -7,9 +7,34 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 - 游戏版本：Minecraft Java **1.21.1**
 - 加载器：Fabric Loader **0.16.9** + Fabric API **0.116.5+1.21.1**
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**
-- 当前版本：**v0.5.6 已发布**
+- 当前版本：**v0.5.7 已发布**
 
-### 核心机制：虚拟方块
+---
+
+## 快速开始
+
+**普通玩家安装（无需开发环境）：**
+
+1. 安装 [Fabric Loader 0.16.9](https://fabricmc.net/use/installer/)，选择 Minecraft **1.21.1**。
+2. 下载 [Fabric API 0.116.5+1.21.1](https://modrinth.com/mod/fabric-api) 与 GitHub Release 的 `worldforge-0.5.7.jar`。
+3. 把两个 JAR 放入 `.minecraft/mods/`，启动游戏。
+4. 进入单人世界，按 **K** 打开 WorldForge Studio。
+
+完整图文教程、5 分钟上手示例、能力清单与常见问题见 **[docs/BETA-GUIDE.md](docs/BETA-GUIDE.md)**。
+
+**开发者构建：**
+
+```bash
+./gradlew build           # 编译 + JUnit 全量测试
+./gradlew runGameTest     # 真实服务端 GameTest
+./gradlew runClient       # 进游戏：按 K 打开 Studio
+```
+
+---
+
+## 核心机制
+
+### 虚拟方块
 
 启动期只注册 **1 个通用原生方块** `worldforge:dynamic_block` + 1 个 BlockEntity 类型 + 1 个 BlockItem。玩家的每个"虚拟方块"是它的实例，身份存于 BlockEntity 的 `VirtualBlockId` 字段，通过 NBT 持久化。
 
