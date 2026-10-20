@@ -1,5 +1,6 @@
 package dev.worldforge.exporter;
 
+import dev.worldforge.definition.BehaviorDefinition;
 import dev.worldforge.definition.ItemDefinition;
 import dev.worldforge.runtime.WorldForgeRuntimeManager;
 import dev.worldforge.block.BlockDefinition;
@@ -9,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * v0.5.0: Export WorldForge definitions as an independent Fabric Mod JAR.
@@ -301,6 +303,55 @@ public final class ModExporter {
 				java.util.List.copyOf(lost));
 	}
 
+	/**
+	 * v0.5.6 P1: per-behavior equivalence audit (shared by items and blocks).
+	 * An action reaches "retained" ONLY when its parameters can be honoured
+	 * exactly by the generated code; hardcoded stand-ins (sound event, particle
+	 * type/count, ignite seconds) with custom values are "converted".
+	 */
+	private static void auditBehaviors(String kind, String id,
+			List<BehaviorDefinition> behaviors,
+			List<String> retained, List<String> converted, List<String> lost) {
+		for (var b : behaviors) {
+			boolean triggerOk = isTriggerExportable(b.trigger());
+			for (String action : b.actions()) {
+				String desc = kind + " " + id + ": " + action + " (trigger=" + b.trigger() + ")";
+				boolean supported = "item".equals(kind)
+						? isSupportedItemAction(action) : isSupportedBlockAction(action);
+				if (!supported) {
+					lost.add(desc + " — 无代码生成实现");
+					continue;
+				}
+				if (!triggerOk) {
+					lost.add(desc + " — 触发器 '" + b.trigger() + "' 在导出 Mod 中未实现（不会并入右键）");
+					continue;
+				}
+				if (hasCustomStandInParams(action, b.parameters())) {
+					converted.add(desc + " — 导出使用固定默认实现（自定义参数无法完全等价）");
+				} else {
+					retained.add(desc);
+				}
+			}
+		}
+	}
+
+	/**
+	 * v0.5.6 P1: true when the definition sets parameters that the generated
+	 * code cannot honour (it hardcodes sound event / particle type / ignite
+	 * duration). apply_effect (effect/duration/amplifier), heal (amount) and
+	 * summon_lightning are fully parameterised.
+	 */
+	private static boolean hasCustomStandInParams(String action, Map<String, Object> params) {
+		if (params == null || params.isEmpty()) return false;
+		return switch (action) {
+			case "sound" -> params.containsKey("sound") || params.containsKey("event");
+			case "particles" -> params.containsKey("particle") || params.containsKey("type")
+					|| params.containsKey("count");
+			case "ignite" -> params.containsKey("seconds") || params.containsKey("duration");
+			default -> false;
+		};
+	}
+
 	// ------------------------------------------------------- plan-based API
 
 	/**
@@ -372,20 +423,7 @@ public final class ModExporter {
 				lost.add("item " + def.id() + ": 属性 " + def.attributes().keySet()
 						+ " 在导出 Mod 中没有等价实现");
 			}
-			for (var b : def.behaviors()) {
-				boolean triggerOk = isTriggerExportable(b.trigger());
-				for (String action : b.actions()) {
-					String desc = "item " + def.id() + ": " + action + " (trigger=" + b.trigger() + ")";
-					if (!isSupportedItemAction(action)) {
-						lost.add(desc + " — 无代码生成实现");
-					} else if (!triggerOk) {
-						// v0.5.5: hit_entity etc. must NOT be folded into right-click
-						lost.add(desc + " — 触发器 '" + b.trigger() + "' 在导出 Mod 中未实现（不会并入右键）");
-					} else {
-						retained.add(desc);
-					}
-				}
-			}
+			auditBehaviors("item", def.id(), def.behaviors(), retained, converted, lost);
 		}
 		for (var def : blocks) {
 			if (def == null) continue;
@@ -395,19 +433,7 @@ public final class ModExporter {
 				lost.add("block " + def.id() + ": 周期行为（每 " + def.tickIntervalTicks()
 						+ " ticks 产出 " + def.outputItemId() + "）在导出 Mod 中没有等价实现");
 			}
-			for (var b : def.behaviors()) {
-				boolean triggerOk = isTriggerExportable(b.trigger());
-				for (String action : b.actions()) {
-					String desc = "block " + def.id() + ": " + action + " (trigger=" + b.trigger() + ")";
-					if (!isSupportedBlockAction(action)) {
-						lost.add(desc + " — 无代码生成实现");
-					} else if (!triggerOk) {
-						lost.add(desc + " — 触发器 '" + b.trigger() + "' 在导出 Mod 中未实现（不会并入右键）");
-					} else {
-						retained.add(desc);
-					}
-				}
-			}
+			auditBehaviors("block", def.id(), def.behaviors(), retained, converted, lost);
 		}
 		return new CapabilityReport(
 				java.util.List.copyOf(retained),
@@ -524,12 +550,18 @@ public final class ModExporter {
 	 * OS, never file existence order (a Linux run must not pick gradlew.bat
 	 * just because copyGradleWrapper laid both files down).
 	 */
+	/**
+	 * v0.5.6 P1: wrapper choice must NEVER cross the OS boundary.
+	 * Windows: gradlew.bat (or system gradle fallback) — never the sh script.
+	 * Linux/macOS: gradlew (or system gradle fallback) — never the .bat.
+	 * "system" signals no wrapper of the correct kind was found; the caller
+	 * must then fail with a clear error instead of silently using system gradle.
+	 */
 	public static String gradleCommandFor(boolean windows, boolean batExists, boolean shExists) {
-		if (windows && batExists) return "bat";
-		if (!windows && shExists) return "sh";
-		if (batExists) return "bat";
-		if (shExists) return "sh";
-		return "system";
+		if (windows) {
+			return batExists ? "bat" : "system";
+		}
+		return shExists ? "sh" : "system";
 	}
 
 	private ModExporter() {}

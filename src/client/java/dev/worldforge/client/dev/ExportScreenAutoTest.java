@@ -124,6 +124,11 @@ public class ExportScreenAutoTest {
 
 	@SuppressWarnings("unchecked")
 	private static <T> T field(Object owner, String name) {
+		if (owner == null) {
+			// screen closed mid-step (player quit / resize re-init) — surface a
+			// clean check failure instead of an NPE crash without a report
+			throw new IllegalStateException("screen closed before reading '" + name + "'");
+		}
 		try {
 			Field f = owner.getClass().getDeclaredField(name);
 			f.setAccessible(true);

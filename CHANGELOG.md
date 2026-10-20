@@ -1,5 +1,72 @@
 # 更新日志
 
+## v0.5.6 已发布 — 符号映射、严格校验与热更新隔离
+
+### P0-1: ExportSymbolMapper 统一符号映射
+
+- **六目标分离**：Minecraft 注册 ID / Java 包名 / 类名 / 字段名 / 资源路径 / 文件名各自独立映射，不再用 replace()+首字母大写拼凑
+- **确定性**：`-`/`.`/连续下划线按非字母数字分段折叠成 PascalCase；`magic-sword`、`magic.device`、`magic_core`、`magic__core` 全部产出合法且可区分的标识符
+- **冲突检测**：不同 ID 折叠到同一类名/字段名时记入冲突，generate() 完成前抛出明确错误（文件写入前完成检查）
+- **关键字转义**：Java 关键字追加 `_`；数字开头加 `_` 前缀
+- **包名**：Mod ID 下划线段折叠，`a_`/`a__b` 不再产生 `a.`/`a..b`
+- 证据：`ExportSymbolMapperBeforeFixTest` 14 项（修复前 4 项失败）
+
+### P0-2: 参数严格校验（拒绝而非改写）
+
+- **效果 ID**：`strictEffectId` 拒绝非法字符与外部命名空间（明确提示"仅支持 minecraft 原版效果"），不再把 `speed!extra` 改写成 `speedextra`
+- **数值**：`preciseInt` 精确整数转换——`2.9` 小数拒绝（不截断）、`NaN`/`Infinity` 拒绝、`Long.MAX_VALUE` 拒绝（不回绕）、范围校验；`2_000_000_000_000` 无法伪装成合法值
+- **校验前移**：`ExportPlan.create` 冻结时即校验，错误在方案创建瞬间暴露，不在后台构建时才炸
+- 证据：`ExportSymbolMapperBeforeFixTest` 6 项参数测试
+
+### P0-3: 移除仓库机器路径
+
+- `gradle.properties` 的 `-Djava.io.tmpdir=E:/javas/tmp` 与 `org.gradle.tmpdir=E:/javas/tmp/gradle-tmp` 移除（v0.5.5 遗留的开发者本机路径）
+- 新增 `repoHasNoMachineSpecificPaths` 自动检查（盘符路径 + URL 协议排除），防止再次提交
+- 证据：`ExportSymbolMapperBeforeFixTest#repoHasNoMachineSpecificPaths`
+
+### P1: 跨平台 wrapper 封闭
+
+- `gradleCommandFor` 不再跨 OS 回退：Windows 只认 .bat，Unix 只认 gradlew，都缺失则**明确报错**（不再静默用系统 Gradle）
+- `copyGradleWrapper` 释放后校验完整性：gradlew 必须存在、Unix 下设置可执行位、wrapper jar 双平台必需
+- Linux 实机构建仍标记未验证（环境限制同 v0.5.5）
+
+### P1: Java 注释封闭
+
+- 新增 `safeCommentText`：JavaDoc 只保留字母/数字/空格/下划线/CJK——`*/`、引号、反斜杠、换行全部剔除，玩家/AI 文本无法提前终止注释或改变语法结构
+- 三处 JavaDoc（自定义 Item/Block/BlockEntity）全部切换
+- 生成器余下字符串插入点沿用 `escapeJava`
+
+### P1: AI 配置 epoch 隔离
+
+- `configEpoch` 每次 reloadConfig 递增；`chat()` 请求绑定发起时的 epoch，回调在 server 线程复核——**旧配置响应静默丢弃**，绝不写入新会话/生成提案/污染 UI
+- `attachProviderForTesting` 同步 bump epoch；`clearRateForTest` 测试隔离钩子（不再让 releaseAll 误清在途提案）
+- 证据：`WorldForgeAgentTests#testAgentBridgeEndToEnd` step 13——慢响应 + 配置切换竞态，stale 回复零泄漏（日志可见 "dropped stale AI response"）
+
+### P1: 六行为等价性核查
+
+- 新增 `auditBehaviors`：retained 必须参数完全可兑现——sound/particles/ignite 的自定义参数（音效事件/粒子类型数量/燃烧秒数）因生成器硬编码而归入 **converted**（"导出使用固定默认实现"），默认参数保持 retained
+- apply_effect（effect/duration/amplifier）、heal（amount）、summon_lightning 参数完全兑现（生成源码逐项断言）
+- 证据：`ActionEquivalenceAuditTest` 6 项（修复前 3 项 converted 缺失失败）
+
+### 文档自动化
+
+- `scripts/sync-version-docs.py`：从 gradle.properties 同步版本号到 README/BETA-GUIDE，终结手工复制错误（v0.4.0 残留引用已清理）
+- README JUnit 统计更正（110→202）
+
+### 验证汇总
+
+| 项目 | 结果 |
+|------|------|
+| JUnit | 202/202（+23） |
+| WorldForge GameTest | 61/61（含 epoch 竞态验证） |
+| Standalone GameTest | 8/8 |
+| Windows 隔离实例 | 51/51（真实构建 auto_mod-1.0.1.jar） |
+| Linux 实机构建 | 未验证（环境限制，同 v0.5.5） |
+| macOS | 未验证（无环境） |
+| JAR | worldforge-0.5.6.jar · SHA-256 361aacdc…a9ed3 |
+
+---
+
 ## v0.5.5 已发布 — 安全修复与跨平台构建
 
 ### 源码审查：8 项发现全部确认并修复

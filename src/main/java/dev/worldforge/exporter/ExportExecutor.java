@@ -268,19 +268,24 @@ public class ExportExecutor {
 		boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
 		var choice = ModExporter.gradleCommandFor(windows,
 				Files.exists(gradleBat), Files.exists(gradlew));
+		// v0.5.6: a missing platform wrapper is a hard error — silently falling
+		// back to a system-installed Gradle hides broken exports and can pick
+		// an incompatible Gradle version.
+		if ("system".equals(choice)) {
+			throw new IllegalStateException(
+					"导出工程缺少 " + (windows ? "gradlew.bat" : "gradlew")
+					+ "——构建模板不完整，无法构建。请重新导出。");
+		}
 		// v0.5.5: 'build' minus runGameTest — the exported JAR must build on a
 		// player machine without launching a second Minecraft (memory-safe
 		// inside a running client; gameTests are run by the dev workflow).
 		// --no-daemon: single short-lived JVM — a resident daemon doubles the
 		// commit charge and fails on memory-tight player machines.
-		return switch (choice) {
-			case "bat" -> List.of(gradleBat.toString(), "build", "-x", "runGameTest",
-					"--no-daemon", "--console=plain");
-			case "sh" -> List.of(gradlew.toString(), "build", "-x", "runGameTest",
-					"--no-daemon", "--console=plain");
-			default -> List.of("gradle", "build", "-x", "runGameTest",
-					"--no-daemon", "--console=plain");
-		};
+		return "bat".equals(choice)
+				? List.of(gradleBat.toString(), "build", "-x", "runGameTest",
+						"--no-daemon", "--console=plain")
+				: List.of(gradlew.toString(), "build", "-x", "runGameTest",
+						"--no-daemon", "--console=plain");
 	}
 
 	/**

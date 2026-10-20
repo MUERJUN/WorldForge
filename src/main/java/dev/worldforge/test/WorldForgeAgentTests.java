@@ -86,6 +86,8 @@ public class WorldForgeAgentTests {
 		server.getPlayerManager().getOpList().add(new net.minecraft.server.OperatorEntry(op.getGameProfile(), 2, false));
 		var sink = new Sink(new CopyOnWriteArrayList<>());
 		AgentBridge.OUTCOME_SINK = sink;
+		AgentBridge.clearRateForTest(); // isolate rate windows between tests
+		AgentBridge.OUTCOME_SINK = sink;
 
 		// ---------- step 1 (test 9): no config -> clear guidance, no crash ----------
 		AgentBridge.attachProviderForTesting(null, AgentConfig.DISABLED);
@@ -235,6 +237,27 @@ public class WorldForgeAgentTests {
 													"confirm must require OP2: " + r8.message());
 											ctx.assertTrue(WorldForgeRuntimeManager.get("worldforge:hacked") == null,
 													"nothing created by non-OP");
+
+											// ---------- step 13 (v0.5.6): epoch drop ----------
+											// a slow reply computed under the CURRENT provider,
+											// then a config switch, must be dropped silently
+											var slowProv = new MockModelProvider((sys, usr) -> {
+												try { Thread.sleep(600); } catch (InterruptedException ignored) {}
+												return "{\"kind\":\"query\",\"what\":\"stale-epoch-reply\"}";
+											});
+											AgentBridge.attachProviderForTesting(slowProv, cfg(30));
+											AgentBridge.chat(server, op, "慢响应测试");
+											int outcomesBefore = sink.got().size();
+											AgentBridge.attachProviderForTesting(
+													MockModelProvider.canned("{\"kind\":\"query\",\"what\":\"after-switch\"}"),
+													cfg(30));
+											try { Thread.sleep(900); } catch (InterruptedException ignored) {}
+											boolean staleLeaked = sink.got().stream()
+													.anyMatch(oo -> oo.text() != null && oo.text().contains("stale-epoch-reply"));
+											ctx.assertTrue(!staleLeaked,
+													"stale-epoch reply must never reach the player");
+											ctx.assertTrue(AgentBridge.configEpochForTest() > 0,
+													"epoch monotonically increases");
 										} finally {
 											AgentBridge.OUTCOME_SINK = null;
 											AgentBridge.attachProviderForTesting(null, AgentConfig.DISABLED);

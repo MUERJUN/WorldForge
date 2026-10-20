@@ -7,23 +7,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 - 游戏版本：Minecraft Java **1.21.1**
 - 加载器：Fabric Loader **0.16.9** + Fabric API **0.116.5+1.21.1**
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**
-- 当前版本：**v0.5.5 已发布**（安全修复与跨平台构建）
-
----
-
-## 快速开始
-
-```bash
-./gradlew build           # 编译 + JUnit 181 项
-./gradlew runGameTest     # 真实服务端 GameTest 61 项
-./gradlew runClient       # 进游戏：按 K 打开 Studio
-```
-
-安装：把 `build/libs/worldforge-0.4.0.jar` + Fabric API 放入 `.minecraft/mods`。
-
----
-
-## v0.4.0 — 动态方块引擎（已发布）
+- 当前版本：**v0.5.6 已发布**
 
 ### 核心机制：虚拟方块
 
@@ -120,7 +104,7 @@ API Key 只存服务端配置文件：不进世界存档、不发给客户端、
 4. 点「确认应用」→ 服务端复核权限与参数 → 创建并落盘
 5. 确认后自动跳到编辑视图 → 「获取测试」→ ESC 关闭直接玩
 
-### 方块提案（v0.4.0）
+### 方块提案
 
 AI 也能创建方块：`创建一个魔法熔炉，外观像熔炉，周期性生成铁锭`。物品与方块是不同类型，即使 ID 相同也不能跨类型误修改。
 
@@ -197,7 +181,7 @@ src/client/java/dev/worldforge/client/
 
 | 测试 | 数量 | 方式 |
 |---|---|---|
-| JUnit | 110 项 | `./gradlew test` |
+| JUnit | 202 项 | `./gradlew test` |
 | GameTest | 61 项 | `./gradlew runGameTest` |
 | 客户端自动化 | 30 步 | `./gradlew runClient`（需 flag） |
 | 独立 Mod 导出 | ✅ 已验证 | 导出 JAR 在无 WorldForge 实例中加载 |

@@ -85,6 +85,13 @@ public final class AgentBridge {
 
 	private static volatile AgentConfig config = AgentConfig.DISABLED;
 	private static volatile ModelProvider provider = null;
+	/**
+	 * v0.5.6 P1: bumped on every config (re)load. Async AI callbacks capture
+	 * the epoch at request time and re-check it inside server.execute — a
+	 * response computed with retired credentials can never write into the new
+	 * session, create a proposal, or overwrite the player's UI state.
+	 */
+	private static volatile long configEpoch = 0;
 	private static final Map<UUID, AgentSession> SESSIONS = new ConcurrentHashMap<>();
 	private static final Map<UUID, PendingProposal> PENDING = new ConcurrentHashMap<>();
 	/** executed proposal ids -> stored result for idempotent replays */
@@ -120,6 +127,7 @@ public final class AgentBridge {
 			}
 		}
 		config = newCfg;
+		configEpoch++; // v0.5.6: invalidate every in-flight callback
 		if (newCfg.usable()) {
 			provider = new OpenAICompatibleProvider(newCfg);
 			WorldForge.LOGGER.info("[WorldForge] AI agent enabled: {}", newCfg); // masked
@@ -133,6 +141,18 @@ public final class AgentBridge {
 	public static void attachProviderForTesting(ModelProvider p, AgentConfig cfg) {
 		provider = p;
 		config = cfg;
+		configEpoch++; // same invalidation semantics as a real reload
+	}
+
+	/** v0.5.6 test hook: reset only the rate window (keeps sessions/pending). */
+	public static void clearRateForTest() {
+		RATE.clear();
+		rateWindowStart = System.currentTimeMillis();
+	}
+
+	/** v0.5.6 test hook: current config generation. */
+	public static long configEpochForTest() {
+		return configEpoch;
 	}
 
 	public static boolean available() {
@@ -209,8 +229,18 @@ public final class AgentBridge {
 		session.addUser(message);
 		String userMsg = session.buildUserMessage(message);
 		var p = provider;
+		// v0.5.6: bind this request to the current config generation
+		final long requestEpoch = configEpoch;
 		p.complete(SYSTEM_PROMPT, userMsg).whenComplete((reply, err) -> server.execute(() -> {
 			// back on the server thread; player may have left meanwhile
+			// v0.5.6: stale-epoch check — a response computed with retired
+			// credentials must be dropped silently (the UI was already
+			// restored by the config switch that retired them)
+			if (requestEpoch != configEpoch) {
+				WorldForge.LOGGER.info("[WorldForge] dropped stale AI response (config epoch {} != {})",
+						requestEpoch, configEpoch);
+				return;
+			}
 			if (err != null) {
 				deliverNow(player, new AgentOutcome(false, "模型调用失败：" + rootCause(err) + "（可视化编辑器仍可用）",
 						null, null, List.of(), null));

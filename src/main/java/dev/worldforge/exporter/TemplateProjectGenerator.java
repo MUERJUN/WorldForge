@@ -71,6 +71,13 @@ public final class TemplateProjectGenerator {
 
 		// GameTest that verifies items/blocks are registered at runtime
 		writeGameTest(src, res);
+
+		// v0.5.6: symbol conflicts between distinct ids are fatal — files may
+		// already reference the disambiguated names, so refuse the export here
+		if (symbols.hasConflict()) {
+			throw new IllegalArgumentException(
+					"导出符号冲突，无法安全生成：\n" + String.join("\n", symbols.conflicts()));
+		}
 	}
 
 	private void writeGameTest(Path src, Path res) throws IOException {
@@ -486,29 +493,52 @@ public final class TemplateProjectGenerator {
 		copyResourceIfPresent("export-template/gradlew", root.resolve("gradlew"));
 		copyResourceIfPresent("export-template/gradlew.bat", root.resolve("gradlew.bat"));
 
-		if (fromResources) return; // success — all from bundled resources
-
-		// Fallback: copy from source project root (IDE dev mode only)
-		var propsSrc = sourceProjectRoot.resolve("gradle/wrapper/gradle-wrapper.properties");
-		if (Files.exists(propsSrc)) {
-			Files.copy(propsSrc, wrapperDir.resolve("gradle-wrapper.properties"),
-					java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-		} else {
-			Files.writeString(wrapperDir.resolve("gradle-wrapper.properties"),
-					"distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14.3-bin.zip\n"
-					+ "distributionType=bin\n");
-		}
-		var jarSrc = sourceProjectRoot.resolve("gradle/wrapper/gradle-wrapper.jar");
-		if (Files.exists(jarSrc)) {
-			Files.copy(jarSrc, wrapperDir.resolve("gradle-wrapper.jar"),
-					java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-		}
-		for (String name : new String[]{"gradlew", "gradlew.bat"}) {
-			var src = sourceProjectRoot.resolve(name);
-			if (Files.exists(src)) {
-				Files.copy(src, root.resolve(name),
+		if (!fromResources) {
+			// Fallback: copy from source project root (IDE dev mode only)
+			var propsSrc = sourceProjectRoot.resolve("gradle/wrapper/gradle-wrapper.properties");
+			if (Files.exists(propsSrc)) {
+				Files.copy(propsSrc, wrapperDir.resolve("gradle-wrapper.properties"),
+						java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+			} else {
+				Files.writeString(wrapperDir.resolve("gradle-wrapper.properties"),
+						"distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14.3-bin.zip\n"
+						+ "distributionType=bin\n");
+			}
+			var jarSrc = sourceProjectRoot.resolve("gradle/wrapper/gradle-wrapper.jar");
+			if (Files.exists(jarSrc)) {
+				Files.copy(jarSrc, wrapperDir.resolve("gradle-wrapper.jar"),
 						java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 			}
+			for (String name : new String[]{"gradlew", "gradlew.bat"}) {
+				var src = sourceProjectRoot.resolve(name);
+				if (Files.exists(src)) {
+					Files.copy(src, root.resolve(name),
+							java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+				}
+			}
+		}
+
+		// v0.5.6 P1: wrapper integrity + executable bit.
+		// gradlew MUST exist and be executable on Unix — ProcessBuilder cannot
+		// run it otherwise, and a silent fallback to system gradle would hide
+		// a broken export.
+		var sh = root.resolve("gradlew");
+		if (!Files.exists(sh)) {
+			throw new IOException(
+					"构建模板不完整：gradlew 未打包（Unix 构建必需）。请重新导出。");
+		}
+		try {
+			var posix = Files.getPosixFilePermissions(sh);
+			posix.add(java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE);
+			posix.add(java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE);
+			Files.setPosixFilePermissions(sh, posix);
+		} catch (UnsupportedOperationException ignored) {
+			// Windows FS — no POSIX permissions; gradlew.bat is used there
+		}
+		// wrapper jar is required by BOTH platforms
+		if (!Files.exists(wrapperDir.resolve("gradle-wrapper.jar"))) {
+			throw new IOException(
+					"构建模板不完整：gradle/wrapper/gradle-wrapper.jar 缺失。请重新导出。");
 		}
 	}
 
@@ -678,7 +708,7 @@ public final class TemplateProjectGenerator {
 		sb.append("import net.minecraft.world.World;\n");
 		sb.append("import java.util.HashMap;\n");
 		sb.append("import java.util.Map;\n\n");
-		sb.append("/**\n * Custom item with exported behaviors for ").append(escapeJava(def.name())).append(".\n */\n");
+		sb.append("/**\n * Custom item with exported behaviors for ").append(safeCommentText(def.name())).append(".\n */\n");
 		sb.append("public final class ").append(className).append(" extends Item {\n\n");
 
 		// Cooldown tracking: per-player last use tick
@@ -756,10 +786,10 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\t}\n");
 			}
 			case "apply_effect" -> {
-				var effectName = ModExporter.sanitizeEffectId(behavior.parameters().getOrDefault("effect", "speed").toString());
-				var duration = ModExporter.sanitizePositiveInt("duration",
+				var effectName = ExportSymbolMapper.strictEffectId(behavior.parameters().getOrDefault("effect", "speed").toString());
+				var duration = ExportSymbolMapper.preciseInt("duration",
 						behavior.parameters().getOrDefault("duration", 200), 1, 7_200_000);
-				var amplifier = ModExporter.sanitizePositiveInt("amplifier",
+				var amplifier = ExportSymbolMapper.preciseInt("amplifier",
 						behavior.parameters().getOrDefault("amplifier", 0), 0, 255);
 				sb.append("\t\t{\n");
 				sb.append("\t\t\tvar effect = net.minecraft.registry.Registries.STATUS_EFFECT\n");
@@ -771,7 +801,7 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\t}\n");
 			}
 			case "heal" -> {
-				var amount = ModExporter.sanitizePositiveInt("amount",
+				var amount = ExportSymbolMapper.preciseInt("amount",
 				behavior.parameters().getOrDefault("amount", 10), 1, 1000);
 				sb.append("\t\tplayer.heal(").append(amount).append("f);\n");
 			}
@@ -858,7 +888,7 @@ public final class TemplateProjectGenerator {
 		sb.append("import net.minecraft.util.hit.BlockHitResult;\n");
 		sb.append("import net.minecraft.util.math.BlockPos;\n");
 		sb.append("import net.minecraft.world.World;\n\n");
-		sb.append("/**\n * Custom block with exported behaviors for ").append(escapeJava(def.name())).append(".\n");
+		sb.append("/**\n * Custom block with exported behaviors for ").append(safeCommentText(def.name())).append(".\n");
 		sb.append(" *\n * v0.5.3: cooldown state lives in a per-instance {@link ").append(entityName).append("}\n");
 		sb.append(" * (persisted via NBT) instead of a static map — isolated per world save,\n");
 		sb.append(" * cleared automatically when the block is removed, and bound to real\n");
@@ -938,7 +968,7 @@ public final class TemplateProjectGenerator {
 		sb.append("import net.minecraft.util.Identifier;\n");
 		sb.append("import net.minecraft.util.math.BlockPos;\n");
 		sb.append("import net.minecraft.registry.RegistryWrapper;\n\n");
-		sb.append("/**\n * Per-instance state for ").append(escapeJava(def.name())).append(".\n");
+		sb.append("/**\n * Per-instance state for ").append(safeCommentText(def.name())).append(".\n");
 		sb.append(" *\n * The cooldown timestamp is persisted in the chunk NBT, so it survives\n");
 		sb.append(" * chunk unload/reload and world restart, is scoped to the current world\n");
 		sb.append(" * save, and is destroyed together with the block.\n */\n");
@@ -998,10 +1028,10 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\t}\n");
 			}
 			case "apply_effect" -> {
-				var effectName = ModExporter.sanitizeEffectId(behavior.parameters().getOrDefault("effect", "speed").toString());
-				var duration = ModExporter.sanitizePositiveInt("duration",
+				var effectName = ExportSymbolMapper.strictEffectId(behavior.parameters().getOrDefault("effect", "speed").toString());
+				var duration = ExportSymbolMapper.preciseInt("duration",
 						behavior.parameters().getOrDefault("duration", 200), 1, 7_200_000);
-				var amplifier = ModExporter.sanitizePositiveInt("amplifier",
+				var amplifier = ExportSymbolMapper.preciseInt("amplifier",
 						behavior.parameters().getOrDefault("amplifier", 0), 0, 255);
 				sb.append("\t\tif (player != null) {\n");
 				sb.append("\t\t\tvar effect = net.minecraft.registry.Registries.STATUS_EFFECT\n");
@@ -1013,7 +1043,7 @@ public final class TemplateProjectGenerator {
 				sb.append("\t\t}\n");
 			}
 			case "heal" -> {
-				var amount = ModExporter.sanitizePositiveInt("amount",
+				var amount = ExportSymbolMapper.preciseInt("amount",
 				behavior.parameters().getOrDefault("amount", 10), 1, 1000);
 				sb.append("\t\tif (player != null) player.heal(").append(amount).append("f);\n");
 			}
@@ -1109,30 +1139,26 @@ public final class TemplateProjectGenerator {
 		return nativeItemId(worldForgeId);
 	}
 
+	// v0.5.6 P0-1: all four symbol families route through ExportSymbolMapper —
+	// deterministic, keyword-escaped, collision-checked. The mapper instance
+	// lives for the whole generate() run so cross-id conflicts are caught
+	// before any file is written.
+	private ExportSymbolMapper symbols = ExportSymbolMapper.create();
+
 	private String itemFieldName(ItemDefinition def) {
-		return "ITEM_" + nativeItemId(def.id()).toUpperCase().replace("-", "_");
+		return symbols.registerField(def.id()) + "_ITEM";
 	}
 
 	private String itemClassName(ItemDefinition def) {
-		var nativeId = nativeItemId(def.id());
-		var sb = new StringBuilder();
-		for (var p : nativeId.split("_")) {
-			if (!p.isEmpty()) sb.append(Character.toUpperCase(p.charAt(0))).append(p.substring(1));
-		}
-		return sb.toString() + "Item";
+		return symbols.registerClass(def.id()) + "Item";
 	}
 
 	private String blockFieldName(BlockDefinition def) {
-		return "BLOCK_" + nativeBlockId(def.id()).toUpperCase().replace("-", "_");
+		return symbols.registerField(def.id()) + "_BLOCK";
 	}
 
 	private String blockClassName(BlockDefinition def) {
-		var nativeId = nativeBlockId(def.id());
-		var sb = new StringBuilder();
-		for (var p : nativeId.split("_")) {
-			if (!p.isEmpty()) sb.append(Character.toUpperCase(p.charAt(0))).append(p.substring(1));
-		}
-		return sb.toString() + "Block";
+		return symbols.registerClass(def.id()) + "Block";
 	}
 
 	private String vanillaBaseBlock(BlockDefinition def) {
@@ -1163,5 +1189,25 @@ public final class TemplateProjectGenerator {
 	private static String escapeJava(String s) {
 		return s.replace("\\", "\\\\").replace("\"", "\\\"")
 				.replace("\n", "\\n").replace("\r", "\\r");
+	}
+
+	/**
+	 * v0.5.6 P1: safe JavaDoc/comment text — strips comment-terminating
+	 * sequences and control characters so player/AI text can never close the
+	 * comment early or smuggle code structure. We deliberately do NOT write
+	 * raw user text into JavaDoc; anything beyond [A-Za-z0-9_\\s] is dropped.
+	 */
+	private static String safeCommentText(String s) {
+		if (s == null) return "";
+		var sb = new StringBuilder();
+		for (char c : s.toCharArray()) {
+			if (Character.isLetterOrDigit(c) || c == ' ' || c == '_'
+					|| (c >= 0x4E00 && c <= 0x9FFF) /* CJK */) {
+				sb.append(c);
+			}
+			// everything else (quotes, backslashes, *, /, newlines, control
+			// chars, format chars) is dropped — comments stay closed
+		}
+		return sb.toString();
 	}
 }

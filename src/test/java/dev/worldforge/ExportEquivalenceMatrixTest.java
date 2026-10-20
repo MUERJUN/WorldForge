@@ -180,22 +180,28 @@ class ExportEquivalenceMatrixTest {
 						List.of("worldforge:evil"), List.of()),
 				"out-of-range numeric params must be rejected at plan creation");
 
-		// the string-injection variant (legal-looking numbers, hostile text)
-		// must pass creation and be sanitized during generation
-		WorldForgeRuntimeManager.createItem(item("worldforge:evil2", "on_use", "apply_effect", 10,
-				Map.of("effect", "speed\"); player.kill(); //", "duration", 200, "amplifier", 0)));
-		var plan2 = ExportPlan.create("evil2_mod", "Evil2", "1.0.0", tempDir.toString(),
-				List.of("worldforge:evil2"), List.of());
-		var projectDir = tempDir.resolve("evil2_mod");
-		var gen = new TemplateProjectGenerator(ModExporter.toRequest(plan2), projectDir,
-				DefinitionResolver.fromSnapshot(plan2));
+		// v0.5.6: hostile effect text is now REJECTED at plan creation —
+		// strict validation, not silent rewriting
+		assertThrows(Exception.class,
+				() -> ExportPlan.create("evil2_mod", "Evil2", "1.0.0", tempDir.toString(),
+						List.of("worldforge:evil2"), List.of()),
+				"illegal effect id must be rejected at plan creation, not rewritten");
+
+		// a LEGAL effect flows through unchanged
+		WorldForgeRuntimeManager.createItem(item("worldforge:good", "on_use", "apply_effect", 10,
+				Map.of("effect", "speed", "duration", 200, "amplifier", 0)));
+		var plan3 = ExportPlan.create("good_mod", "Good", "1.0.0", tempDir.toString(),
+				List.of("worldforge:good"), List.of());
+		var projectDir3 = tempDir.resolve("good_mod");
+		var gen3 = new TemplateProjectGenerator(ModExporter.toRequest(plan3), projectDir3,
+				DefinitionResolver.fromSnapshot(plan3));
 		var generated = assertDoesNotThrow(() -> {
-			gen.generate();
-			return Files.readString(projectDir.resolve("src/main/java/evil2/mod/Evil2Item.java"));
+			gen3.generate();
+			return Files.readString(projectDir3.resolve("src/main/java/good/mod/GoodItem.java"));
 		});
 		assertTrue(generated.contains("minecraft:speed"),
-				"effect sanitized to a legal id");
+				"legal effect id reaches generated code verbatim");
 		assertFalse(generated.contains("player.kill()"),
-				"injected Java must not survive into generated code");
+				"no injected Java anywhere");
 	}
 }
