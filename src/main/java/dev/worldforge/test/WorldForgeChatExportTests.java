@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BooleanSupplier;
 import java.util.zip.ZipFile;
 
 /**
@@ -32,12 +33,6 @@ import java.util.zip.ZipFile;
  *
  * <p>The same exporter, the same plan and the same executor as the old export
  * screen: the chat only adds the conversation around them.</p>
- *
- * <p><b>One long wait, no poll loop.</b> The GameTest scheduler iterates its
- * pending tasks WHILE a task runs, so a task that re-schedules itself from
- * inside the runner corrupts that iteration and the chain silently dies. This
- * test therefore waits ONCE for as long as a real Gradle build needs and then
- * asserts everything.</p>
  */
 public class WorldForgeChatExportTests {
 
@@ -47,24 +42,24 @@ public class WorldForgeChatExportTests {
 	/**
 	 * System property that OPTS IN to this test.
 	 *
-	 * <p>A real Gradle build takes minutes, and the GameTest tick budget is
-	 * anchored at the moment the test was QUEUED, so a test that waits for a
-	 * build cannot share a suite with fast tests without making the whole
-	 * suite unpredictable. The test therefore does nothing unless it is
-	 * explicitly enabled; the Linux CI enables it on every run.</p>
+	 * <p>A real Gradle build takes minutes, so the test does nothing unless it
+	 * is explicitly enabled: {@code ./gradlew runGameTest -PwfChatExport}. The
+	 * Linux CI enables it on every run.</p>
 	 */
 	public static final String OPT_IN = "worldforge.chat.export.gametest";
 
 	/**
-	 * How long the test waits for the real build (ticks; 20 ticks = 1 second).
+	 * How long the build wait lasts (ticks; 20 ticks = 1 second).
 	 *
-	 * <p>A cold Gradle build of the exported project needs roughly 60-120
-	 * seconds on a normal machine; 2400 ticks (2 minutes) covers that with
-	 * room to spare. The GameTest {@code tickLimit} is set far higher because
-	 * the tick budget also covers the time the test spends QUEUED behind the
-	 * other batches.</p>
+	 * <p>A cold Gradle build of the exported project downloads the Gradle
+	 * distribution and the Fabric dependencies, so it can take anywhere from
+	 * one to several minutes. 12000 ticks = 10 minutes, which is generous
+	 * enough for a cold CI runner and bounded enough to fail instead of hang.</p>
 	 */
-	private static final long BUILD_WAIT_TICKS = 2400;
+	private static final long BUILD_WAIT_TICKS = 12_000;
+
+	/** how long the first wait lasts (the report + the confirmation) */
+	private static final long FIRST_WAIT_TICKS = 120;
 
 	private static final class Recorder implements AgentOrchestrator.AgentEventSink {
 		final List<ToolEvent> events = new CopyOnWriteArrayList<>();
@@ -116,6 +111,7 @@ public class WorldForgeChatExportTests {
 		}
 	}
 
+
 	/**
 	 * Flow C: the chat really builds a standalone mod.
 	 */
@@ -123,8 +119,8 @@ public class WorldForgeChatExportTests {
 			tickLimit = 2_000_000)
 	public void flowC_chatExportProducesARealJar(TestContext ctx) {
 		if (!Boolean.getBoolean(OPT_IN)) {
-			// not opted in — the real build is verified separately (see the
-			// CI workflow and docs/ACCEPTANCE-v0.7.0.md)
+			// not opted in — the real build is verified separately (see the CI
+			// workflow and docs/ACCEPTANCE-v0.7.0.md)
 			ctx.complete();
 			return;
 		}
@@ -160,7 +156,7 @@ public class WorldForgeChatExportTests {
 		AgentOrchestrator.send(server, player, conversationId, "把刚才的剑导出成一个独立 Mod", null, recorder);
 
 		// --- 1) the capability report, then the confirmation ---
-		ctx.waitAndRun(120, () -> {
+		ctx.waitAndRun(FIRST_WAIT_TICKS, () -> {
 			var report = recorder.finished("check_export_capabilities");
 			ctx.assertTrue(report != null, "the agent must ask for the capability report "
 					+ recorder.dump());
@@ -179,47 +175,53 @@ public class WorldForgeChatExportTests {
 			boolean ok = AgentOrchestrator.confirm(player.getUuid(), conversationId,
 					pending.confirmationId());
 			ctx.assertTrue(ok, "the confirmation must be accepted");
-		});
 
-		// --- 2) the real build runs; give it the time a Gradle build needs ---
-		ctx.waitAndRun(BUILD_WAIT_TICKS, () -> {
-			var exportEvent = recorder.finished("export_mod");
-			// the JAR on disk is the real acceptance; the event is the
-			// conversation's view of it
-			if (exportEvent == null && findJar() == null) {
-				ctx.assertTrue(false, "the export must report a final state " + recorder.dump());
-				return;
-			}
-			ctx.assertTrue(exportEvent != null && exportEvent.status() == ToolEventStatus.SUCCEEDED,
-					"the export must succeed: " + (exportEvent == null ? "(no event)"
-							: exportEvent.summary() + " / " + exportEvent.errorCode())
-							+ recorder.dump());
+			// --- 2) the real build runs ---
+			//
+			// ONE wait, scheduled from inside the confirmation wait so that it
+			// is measured from NOW. The GameTest tick budget is anchored at the
+			// moment the test was QUEUED, so a wait scheduled from the test
+			// method body can already be "in the past" when the test starts.
+			ctx.waitAndRun(BUILD_WAIT_TICKS, () -> {
+						var exportEvent = recorder.finished("export_mod");
+						// the JAR on disk is the real acceptance; the event is the
+						// conversation's view of it
+						if (exportEvent == null && findJar() == null) {
+							ctx.assertTrue(false, "the export must report a final state " + recorder.dump());
+							return;
+						}
+						ctx.assertTrue(exportEvent != null
+									&& exportEvent.status() == ToolEventStatus.SUCCEEDED,
+								"the export must succeed: " + (exportEvent == null ? "(no event)"
+										: exportEvent.summary() + " / " + exportEvent.errorCode())
+										+ recorder.dump());
 
-			// the JAR really exists, in the workspace
-			Path jar = findJar();
-			ctx.assertTrue(jar != null, "a JAR must exist in the workspace");
-			if (jar == null) {
-				return;
-			}
-			try {
-				ctx.assertTrue(Files.size(jar) > 1024, "the JAR must not be empty");
-			} catch (java.io.IOException e) {
-				ctx.assertTrue(false, "the JAR must be readable: " + e);
-			}
-			// and it really is a Fabric mod
-			try (ZipFile zip = new ZipFile(jar.toFile())) {
-				var entry = zip.getEntry("fabric.mod.json");
-				ctx.assertTrue(entry != null, "the JAR must contain fabric.mod.json");
-				if (entry != null) {
-					String json = new String(zip.getInputStream(entry).readAllBytes(),
-							java.nio.charset.StandardCharsets.UTF_8);
-					ctx.assertTrue(json.contains("chat_export_mod"),
-							"the exported mod must be the one that was asked for");
-				}
-			} catch (Exception e) {
-				ctx.assertTrue(false, "the JAR must be a readable zip: " + e);
-			}
-			ctx.complete();
+						// the JAR really exists, in the workspace
+						Path jar = findJar();
+						ctx.assertTrue(jar != null, "a JAR must exist in the workspace");
+						if (jar == null) {
+							return;
+						}
+						try {
+							ctx.assertTrue(Files.size(jar) > 1024, "the JAR must not be empty");
+						} catch (java.io.IOException e) {
+							ctx.assertTrue(false, "the JAR must be readable: " + e);
+						}
+						// and it really is a Fabric mod
+						try (ZipFile zip = new ZipFile(jar.toFile())) {
+							var entry = zip.getEntry("fabric.mod.json");
+							ctx.assertTrue(entry != null, "the JAR must contain fabric.mod.json");
+							if (entry != null) {
+								String json = new String(zip.getInputStream(entry).readAllBytes(),
+										java.nio.charset.StandardCharsets.UTF_8);
+								ctx.assertTrue(json.contains("chat_export_mod"),
+										"the exported mod must be the one that was asked for");
+							}
+						} catch (Exception e) {
+							ctx.assertTrue(false, "the JAR must be a readable zip: " + e);
+						}
+						ctx.complete();
+				});
 		});
 	}
 
