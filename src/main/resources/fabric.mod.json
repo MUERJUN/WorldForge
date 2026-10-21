@@ -1,44 +1,45 @@
 {
-	"schemaVersion": 1,
-	"id": "worldforge",
-	"version": "${version}",
-	"name": "WorldForge",
-	"description": "Runtime dynamic item engine for Minecraft - create, modify and delete virtual items without restarting the game. v0.3.0: + AI AgentBridge - natural-language item creation with two-phase server-validated proposals.",
-	"authors": [
-		"MUERJUN"
-	],
-	"contact": {
-		"homepage": "https://github.com/MUERJUN/WorldForge",
-		"sources": "https://github.com/MUERJUN/WorldForge"
-	},
-	"license": "MIT",
-	"icon": "assets/worldforge/icon.png",
-	"environment": "*",
-	"entrypoints": {
-		"main": [
-			"dev.worldforge.WorldForge"
-		],
-		"client": [
-			"dev.worldforge.client.WorldForgeClient"
-		],
-		"fabric-gametest": [
-			"dev.worldforge.test.WorldForgeGameTests",
-			"dev.worldforge.test.WorldForgeV012Tests",
-			"dev.worldforge.test.WorldForgeStudioBusinessTests",
-			"dev.worldforge.test.WorldForgeAgentTests",
-			"dev.worldforge.test.WorldForgeBlockTests",
-			"dev.worldforge.test.WorldForgeBlockRegressionTests",
-			"dev.worldforge.test.WorldForgeBlockToolTests",
-			"dev.worldforge.test.WorldForgeBlockLifecycleTests",
-			"dev.worldforge.test.WorldForgeChunkLifecycleTests",
-			"dev.worldforge.test.WorldForgeSurvivalBreakTests",
-			"dev.worldforge.test.WorldForgeBlockE2ETests"
-		]
-	},
-	"depends": {
-		"fabricloader": ">=0.16.0",
-		"minecraft": "~1.21.1",
-		"java": ">=21",
-		"fabric-api": "*"
-	}
+  "schemaVersion": 1,
+  "id": "worldforge",
+  "version": "${version}",
+  "name": "WorldForge",
+  "description": "Runtime dynamic item engine for Minecraft - create, modify and delete virtual items without restarting the game. v0.3.0: + AI AgentBridge - natural-language item creation with two-phase server-validated proposals.",
+  "authors": [
+    "MUERJUN"
+  ],
+  "contact": {
+    "homepage": "https://github.com/MUERJUN/WorldForge",
+    "sources": "https://github.com/MUERJUN/WorldForge"
+  },
+  "license": "MIT",
+  "icon": "assets/worldforge/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "dev.worldforge.WorldForge"
+    ],
+    "client": [
+      "dev.worldforge.client.WorldForgeClient"
+    ],
+    "fabric-gametest": [
+      "dev.worldforge.test.WorldForgeGameTests",
+      "dev.worldforge.test.WorldForgeV012Tests",
+      "dev.worldforge.test.WorldForgeStudioBusinessTests",
+      "dev.worldforge.test.WorldForgeAgentTests",
+      "dev.worldforge.test.WorldForgeBlockTests",
+      "dev.worldforge.test.WorldForgeBlockRegressionTests",
+      "dev.worldforge.test.WorldForgeBlockToolTests",
+      "dev.worldforge.test.WorldForgeBlockLifecycleTests",
+      "dev.worldforge.test.WorldForgeChunkLifecycleTests",
+      "dev.worldforge.test.WorldForgeSurvivalBreakTests",
+      "dev.worldforge.test.WorldForgeBlockE2ETests",
+      "dev.worldforge.test.WorldForgeChatFlowTests"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
 }

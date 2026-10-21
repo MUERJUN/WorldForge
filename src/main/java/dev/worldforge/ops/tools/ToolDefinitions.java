@@ -154,6 +154,11 @@ public final class ToolDefinitions {
 
 	/**
 	 * Builds a validated block definition for a create operation.
+	 *
+	 * <p>Validated with {@link dev.worldforge.tool.WorldForgeBlockTools#validate},
+	 * the SAME validator the {@code /wf} command path uses — so the block
+	 * action whitelist, the appearance catalogue and the periodic limits are
+	 * identical no matter who asked.</p>
 	 */
 	public static Outcome<BlockDefinition> createBlock(ToolRequest req) {
 		Proposal.CreateBlock cb = new Proposal.CreateBlock(
@@ -167,42 +172,86 @@ public final class ToolDefinitions {
 				str(req, "output_item_id"),
 				intg(req, "output_count"),
 				behaviors(req, "behaviors"));
-		var errors = ProposalValidator.validate(cb);
-		if (!errors.ok()) {
-			return Outcome.fail("参数校验失败: " + errors.joined());
+		BlockDefinition def = toBlockDefinition(cb);
+		var validation = dev.worldforge.tool.WorldForgeBlockTools.validate(def);
+		if (!validation.ok()) {
+			return Outcome.fail("参数校验失败: " + validation.joined());
 		}
-		return Outcome.ok(toBlockDefinition(cb));
+		return Outcome.ok(def);
 	}
 
 	/**
 	 * Builds a validated, merged block definition for an update operation.
+	 *
+	 * <p>Unset fields keep their current value. The behaviour list can be
+	 * replaced wholesale ({@code behaviors}) or extended
+	 * ({@code add_behaviors}); the merged definition is then validated by the
+	 * block validator, so an action the block engine cannot perform is
+	 * refused BEFORE anything is written.</p>
 	 */
 	public static Outcome<BlockDefinition> updateBlock(ToolRequest req, BlockDefinition current) {
-		Proposal.UpdateBlock ub = new Proposal.UpdateBlock(
-				str(req, "id"),
-				str(req, "name"),
-				str(req, "description"),
-				str(req, "appearance"),
-				str(req, "category"),
-				num(req, "hardness"),
-				intg(req, "tick_interval_ticks"),
-				str(req, "output_item_id"),
-				intg(req, "output_count"));
-		var errors = ProposalValidator.validate(ub);
-		if (!errors.ok()) {
-			return Outcome.fail("参数校验失败: " + errors.joined());
-		}
-		return Outcome.ok(new BlockDefinition(
+		var behaviors = mergeBehaviors(req, current);
+		BlockDefinition merged = new BlockDefinition(
 				current.version(), current.id(),
-				ub.name() == null ? current.name() : ub.name(),
-				ub.description() == null ? current.description() : ub.description(),
-				ub.appearance() == null ? current.appearance() : ub.appearance(),
-				ub.category() == null ? current.category() : parseCategory(ub.category()),
-				ub.hardness() == null ? current.hardness() : ub.hardness(),
-				current.behaviors(),
-				ub.tickIntervalTicks() == null ? current.tickIntervalTicks() : ub.tickIntervalTicks(),
-				ub.outputItemId() == null ? current.outputItemId() : ub.outputItemId(),
-				ub.outputCount() == null ? current.outputCount() : ub.outputCount()));
+				str(req, "name") == null ? current.name() : str(req, "name"),
+				str(req, "description") == null ? current.description() : str(req, "description"),
+				str(req, "appearance") == null ? current.appearance() : str(req, "appearance"),
+				str(req, "category") == null ? current.category() : parseCategory(str(req, "category")),
+				num(req, "hardness") == null ? current.hardness() : num(req, "hardness"),
+				behaviors,
+				intg(req, "tick_interval_ticks") == null ? current.tickIntervalTicks()
+						: intg(req, "tick_interval_ticks"),
+				str(req, "output_item_id") == null ? current.outputItemId() : str(req, "output_item_id"),
+				intg(req, "output_count") == null ? current.outputCount() : intg(req, "output_count"));
+		var validation = dev.worldforge.tool.WorldForgeBlockTools.validate(merged);
+		if (!validation.ok()) {
+			return Outcome.fail("参数校验失败: " + validation.joined());
+		}
+		return Outcome.ok(merged);
+	}
+
+	/**
+	 * Merges the behaviour arguments into the current behaviour list.
+	 *
+	 * <p>{@code behaviors} replaces the list, {@code add_behaviors} extends
+	 * it (skipping duplicates), and {@code remove_triggers} drops the
+	 * behaviours of the named triggers.</p>
+	 */
+	public static List<dev.worldforge.definition.BehaviorDefinition> mergeBehaviors(
+			ToolRequest req, BlockDefinition current) {
+		List<dev.worldforge.definition.BehaviorDefinition> out = new ArrayList<>(current.behaviors());
+		if (req.arguments().containsKey("behaviors")) {
+			out.clear();
+			out.addAll(convertBehaviors(behaviors(req, "behaviors")));
+			return out;
+		}
+		if (req.arguments().containsKey("add_behaviors")) {
+			for (var b : convertBehaviors(behaviors(req, "add_behaviors"))) {
+				boolean dup = out.stream().anyMatch(x -> x.trigger().equals(b.trigger())
+						&& x.actions().equals(b.actions()));
+				if (!dup) {
+					out.add(b);
+				}
+			}
+		}
+		Object rt = req.arguments().get("remove_triggers");
+		if (rt instanceof List<?> list) {
+			for (Object o : list) {
+				String trigger = String.valueOf(o);
+				out.removeIf(b -> b.trigger().equalsIgnoreCase(trigger));
+			}
+		}
+		return out;
+	}
+
+	/** Converts model-facing behaviour specs into real behaviour definitions. */
+	public static List<dev.worldforge.definition.BehaviorDefinition> convertBehaviors(
+			List<Proposal.BehaviorSpec> specs) {
+		List<dev.worldforge.definition.BehaviorDefinition> out = new ArrayList<>();
+		for (Proposal.BehaviorSpec b : specs) {
+			out.add(ProposalValidator.toBehavior(b));
+		}
+		return out;
 	}
 
 	/** Mirrors {@code AgentBridge.executeBlockProposal}'s category parsing. */

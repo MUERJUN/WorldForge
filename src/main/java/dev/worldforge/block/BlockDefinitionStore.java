@@ -194,7 +194,17 @@ public final class BlockDefinitionStore {
 		}
 	}
 
-	/** atomic save: temp file + move, keeping the previous file on failure */
+	/**
+	 * Crash-safe save.
+	 *
+	 * <p>v0.7.0: this now uses the SAME {@link dev.worldforge.persistence.AtomicFileWriter}
+	 * transaction as the item file — journal with a sha-256 digest, atomic
+	 * move, backup and rollback. The previous hand-rolled tmp+move had no
+	 * journal, so a crash between the write and the move left the block file
+	 * with no recovery evidence, and its {@code blocks.json.tmp} name collided
+	 * with the recovery sweep. The AI now mutates block definitions routinely,
+	 * so this path has to be as safe as the item path.</p>
+	 */
 	public boolean save(List<BlockDefinition> definitions) {
 		JsonObject root = new JsonObject();
 		root.addProperty("version", FILE_VERSION);
@@ -204,29 +214,14 @@ public final class BlockDefinitionStore {
 		}
 		root.add("blocks", arr);
 		Path target = file();
-		Path tmp = target.resolveSibling(FILE_NAME + ".tmp");
 		try {
 			Files.createDirectories(dir);
-			Files.writeString(tmp, root.toString(), StandardCharsets.UTF_8);
-			try {
-				Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
-			} catch (IOException moveFailure) {
-				// v0.5.7: rename refused (Windows temp junctions) — copy+delete
-				Files.copy(tmp, target, StandardCopyOption.REPLACE_EXISTING);
-				try {
-					Files.deleteIfExists(tmp);
-				} catch (IOException ignored) {
-				}
-			}
+			dev.worldforge.persistence.AtomicFileWriter.commit(target, root.toString());
 			lastError = "";
 			return true;
 		} catch (IOException e) {
 			lastError = e.toString();
 			WorldForge.LOGGER.error("[WorldForge] FAILED to save block definitions (previous file kept): {}", e);
-			try {
-				Files.deleteIfExists(tmp);
-			} catch (IOException ignored) {
-			}
 			return false;
 		}
 	}

@@ -18,16 +18,27 @@ public record TargetBlock(
 		boolean hit,
 		BlockPos pos,
 		String vanillaId,
-		String virtualId) {
+		String virtualId,
+		String diagnostic) {
+
+	/** A compact description of where the player was looking, for the log. */
+	public String diagnostic() {
+		return diagnostic == null ? "" : diagnostic;
+	}
 
 	/** Reads the current target from the player's context. */
 	public static TargetBlock read(ToolContext ctx) {
 		if (ctx == null || ctx.player() == null || ctx.world() == null) {
-			return new TargetBlock(false, BlockPos.ORIGIN, "", "");
+			return new TargetBlock(false, BlockPos.ORIGIN, "", "", "no player context");
 		}
-		HitResult hit = ctx.player().raycast(6.0f, 0.0f, false);
+		// tickDelta 1.0 = the CURRENT frame: with 0.0 the ray would use the
+		// interpolated (previous) yaw/pitch and could miss what the player sees
+		HitResult hit = ctx.player().raycast(6.0, 1.0f, false);
 		if (hit.getType() != HitResult.Type.BLOCK) {
-			return new TargetBlock(false, BlockPos.ORIGIN, "", "");
+			return new TargetBlock(false, BlockPos.ORIGIN, "", "",
+					"pos=" + ctx.player().getPos() + " eye=" + ctx.player().getEyePos()
+							+ " yaw=" + ctx.player().getYaw() + " pitch=" + ctx.player().getPitch()
+							+ " world=" + ctx.world().getRegistryKey().getValue());
 		}
 		BlockHitResult bhr = (BlockHitResult) hit;
 		BlockPos pos = bhr.getBlockPos();
@@ -38,6 +49,6 @@ public record TargetBlock(
 		if (be instanceof DynamicBlockEntity dbe) {
 			virtualId = dbe.virtualId();
 		}
-		return new TargetBlock(true, pos, vanillaId, virtualId);
+		return new TargetBlock(true, pos, vanillaId, virtualId, "");
 	}
 }

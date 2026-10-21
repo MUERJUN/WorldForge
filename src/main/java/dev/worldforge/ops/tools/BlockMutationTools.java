@@ -94,9 +94,12 @@ public final class BlockMutationTools {
 		props.add("tick_interval_ticks", JsonSchemaValidator.prop("integer", "新的周期间隔", 20, 72000));
 		props.add("output_item_id", JsonSchemaValidator.prop("string", "新的产出物品 id"));
 		props.add("output_count", JsonSchemaValidator.prop("integer", "新的产出数量", 1, 8));
+		props.add("behaviors", ItemMutationTools.behaviourArraySchema());
+		props.add("add_behaviors", ItemMutationTools.behaviourArraySchema());
 		JsonObject schema = JsonSchemaValidator.object(props, List.of("id"));
 		return ToolDescriptor.write(UPDATE,
-				"修改一个已存在的 WorldForge 动态方块定义。未写的字段保持不变。",
+				"修改一个已存在的 WorldForge 动态方块定义。未写的字段保持不变；"
+						+ "behaviors 会整体替换行为列表，add_behaviors 会追加行为。",
 				schema);
 	}
 
@@ -159,7 +162,7 @@ public final class BlockMutationTools {
 	public static final ToolExecutor INSPECT_TARGET_EXEC = (ctx, request, sink) -> {
 		var target = TargetBlock.read(ctx);
 		if (!target.hit()) {
-			return ToolResult.fail("no_target", "你没有看向任何方块");
+			return ToolResult.fail("no_target", "你没有看向任何方块 (" + target.diagnostic() + ")");
 		}
 		JsonObject o = new JsonObject();
 		o.addProperty("block_id", target.vanillaId());
@@ -196,6 +199,8 @@ public final class BlockMutationTools {
 		props.add("category", JsonSchemaValidator.propEnum("方块类型", "decoration", "interactive", "periodic"));
 		props.add("hardness", JsonSchemaValidator.prop("number", "新的硬度", 0, 50));
 		props.add("tick_interval_ticks", JsonSchemaValidator.prop("integer", "新的周期间隔", 20, 72000));
+		props.add("behaviors", ItemMutationTools.behaviourArraySchema());
+		props.add("add_behaviors", ItemMutationTools.behaviourArraySchema());
 		JsonObject schema = JsonSchemaValidator.object(props, List.of());
 		return ToolDescriptor.write(MODIFY_TARGET,
 				"修改玩家当前视线所指的 WorldForge 动态方块。修改的是它的共享定义，"
@@ -206,7 +211,7 @@ public final class BlockMutationTools {
 	public static final ToolExecutor MODIFY_TARGET_EXEC = (ctx, request, sink) -> {
 		var target = TargetBlock.read(ctx);
 		if (!target.hit()) {
-			return ToolResult.fail("no_target", "你没有看向任何方块");
+			return ToolResult.fail("no_target", "你没有看向任何方块 (" + target.diagnostic() + ")");
 		}
 		if (target.virtualId() == null || target.virtualId().isBlank()) {
 			return ToolResult.fail("not_a_worldforge_block",

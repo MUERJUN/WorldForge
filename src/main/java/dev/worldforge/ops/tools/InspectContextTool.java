@@ -91,7 +91,9 @@ public final class InspectContextTool {
 
 		// ---- targeted block ----
 		JsonObject target = new JsonObject();
-		HitResult hit = player.raycast(6.0f, 0.0f, false);
+		// tickDelta 1.0 = the CURRENT frame: with 0.0 the ray would use the
+		// interpolated (previous) yaw/pitch and could miss what the player sees
+		HitResult hit = player.raycast(6.0, 1.0f, false);
 		if (hit.getType() == HitResult.Type.BLOCK) {
 			BlockHitResult bhr = (BlockHitResult) hit;
 			BlockPos pos = bhr.getBlockPos();
