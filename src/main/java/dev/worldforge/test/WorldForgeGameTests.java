@@ -142,7 +142,7 @@ public class WorldForgeGameTests {
 	public void testE_persistenceRoundTrip(TestContext ctx) {
 		Path dir;
 		try {
-			dir = Files.createTempDirectory("wf-gametest-e");
+			dir = TestTempDirs.create("wf-gametest-e");
 		} catch (Exception e) {
 			throw new RuntimeException("tempdir", e);
 		}
@@ -210,7 +210,7 @@ public class WorldForgeGameTests {
 	public void testG_reloadIdempotent(TestContext ctx) {
 		Path dir;
 		try {
-			dir = Files.createTempDirectory("wf-gametest-g");
+			dir = TestTempDirs.create("wf-gametest-g");
 		} catch (Exception e) {
 			throw new RuntimeException("tempdir", e);
 		}
@@ -269,7 +269,7 @@ public class WorldForgeGameTests {
 		// position occupied by a directory, so every write fails.
 		java.nio.file.Path dir;
 		try {
-			dir = Files.createTempDirectory("wf-r1");
+			dir = TestTempDirs.create("wf-r1");
 			Files.createDirectories(dir.resolve("items.json")); // file slot taken by a directory
 		} catch (Exception e) {
 			throw new RuntimeException("setup", e);
@@ -295,7 +295,7 @@ public class WorldForgeGameTests {
 	public void testR2_mirrorMustNotTouchServerState(TestContext ctx) {
 		java.nio.file.Path dir;
 		try {
-			dir = Files.createTempDirectory("wf-r2");
+			dir = TestTempDirs.create("wf-r2");
 		} catch (Exception e) {
 			throw new RuntimeException("setup", e);
 		}
@@ -359,7 +359,7 @@ public class WorldForgeGameTests {
 	public void testR1b_failedSaveKeepsState(TestContext ctx) {
 		java.nio.file.Path dir;
 		try {
-			dir = Files.createTempDirectory("wf-r1b");
+			dir = TestTempDirs.create("wf-r1b");
 		} catch (Exception e) {
 			throw new RuntimeException("setup", e);
 		}
@@ -541,7 +541,7 @@ public class WorldForgeGameTests {
 	public void testR6_multiplayerSyncSnapshotWire(TestContext ctx) {
 		java.nio.file.Path dir;
 		try {
-			dir = Files.createTempDirectory("wf-r6");
+			dir = TestTempDirs.create("wf-r6");
 		} catch (Exception e) {
 			throw new RuntimeException("setup", e);
 		}
@@ -596,7 +596,7 @@ public class WorldForgeGameTests {
 	public void testR8_reloadOnCorruptFilePreservesState(TestContext ctx) {
 		java.nio.file.Path dir;
 		try {
-			dir = Files.createTempDirectory("wf-r8");
+			dir = TestTempDirs.create("wf-r8");
 		} catch (Exception e) {
 			throw new RuntimeException("setup", e);
 		}

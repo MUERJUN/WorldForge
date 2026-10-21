@@ -30,7 +30,7 @@ public class WorldForgeV012Tests {
 	public void testR7_noCrossWorldLeakage(TestContext ctx) {
 		java.nio.file.Path dir;
 		try {
-			dir = Files.createTempDirectory("wf-r7-a");
+			dir = TestTempDirs.create("wf-r7-a");
 		} catch (Exception e) {
 			throw new RuntimeException("setup", e);
 		}
@@ -70,7 +70,7 @@ public class WorldForgeV012Tests {
 	public void testR9_threePhaseResults(TestContext ctx) {
 		java.nio.file.Path dir;
 		try {
-			dir = Files.createTempDirectory("wf-r9");
+			dir = TestTempDirs.create("wf-r9");
 		} catch (Exception e) {
 			throw new RuntimeException("setup", e);
 		}
@@ -125,7 +125,7 @@ public class WorldForgeV012Tests {
 	public void testR11_strictReloadRejectsPartialDamage(TestContext ctx) {
 		java.nio.file.Path dir;
 		try {
-			dir = Files.createTempDirectory("wf-r11");
+			dir = TestTempDirs.create("wf-r11");
 		} catch (Exception e) {
 			throw new RuntimeException("setup", e);
 		}
@@ -170,17 +170,17 @@ public class WorldForgeV012Tests {
 	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-v020")
 	public void testR12_strictLoadRejectsShapes(TestContext ctx) {
 		try {
-			java.nio.file.Path d1 = Files.createTempDirectory("wf-r12a");
+			java.nio.file.Path d1 = TestTempDirs.create("wf-r12a");
 			Files.writeString(d1.resolve("items.json"), "{\"version\":1}");
 			var r1 = new DefinitionStore(d1).tryLoadStrict();
 			ctx.assertTrue(!r1.ok(), "missing items array must be rejected strictly");
 
-			java.nio.file.Path d2 = Files.createTempDirectory("wf-r12b");
+			java.nio.file.Path d2 = TestTempDirs.create("wf-r12b");
 			Files.writeString(d2.resolve("items.json"), "{\"version\":99,\"items\":[]}");
 			var r2 = new DefinitionStore(d2).tryLoadStrict();
 			ctx.assertTrue(!r2.ok(), "unsupported newer file version must be rejected strictly");
 
-			java.nio.file.Path d3 = Files.createTempDirectory("wf-r12c");
+			java.nio.file.Path d3 = TestTempDirs.create("wf-r12c");
 			Files.writeString(d3.resolve("items.json"), """
 					{"version":1,"items":[
 					  {"version":1,"id":"worldforge:dup","name":"A"},
@@ -189,13 +189,13 @@ public class WorldForgeV012Tests {
 			var r3 = new DefinitionStore(d3).tryLoadStrict();
 			ctx.assertTrue(!r3.ok(), "duplicate ids must be rejected strictly");
 
-			java.nio.file.Path d4 = Files.createTempDirectory("wf-r12d");
+			java.nio.file.Path d4 = TestTempDirs.create("wf-r12d");
 			Files.writeString(d4.resolve("items.json"), "{\"version\":1,\"items\":[]}");
 			var r4 = new DefinitionStore(d4).tryLoadStrict();
 			ctx.assertTrue(r4.ok() && r4.definitions().isEmpty(),
 					"a genuinely empty project stays valid");
 
-			java.nio.file.Path d5 = Files.createTempDirectory("wf-r12e");
+			java.nio.file.Path d5 = TestTempDirs.create("wf-r12e");
 			Files.writeString(d5.resolve("items.json"), """
 					{"version":1,"items":[
 					  {"version":1,"id":"worldforge:badtype","attributes":{"damage":"NaN-string"}}
@@ -213,7 +213,7 @@ public class WorldForgeV012Tests {
 	public void testR10_tryLoadNeverQuarantines(TestContext ctx) {
 		java.nio.file.Path dir;
 		try {
-			dir = Files.createTempDirectory("wf-r10");
+			dir = TestTempDirs.create("wf-r10");
 			Files.writeString(dir.resolve("items.json"), "{oops");
 		} catch (Exception e) {
 			throw new RuntimeException("setup", e);

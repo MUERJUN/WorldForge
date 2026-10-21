@@ -29,11 +29,7 @@ import java.util.List;
 public class WorldForgeBlockTests {
 
 	private static java.nio.file.Path tempDir(String prefix) {
-		try {
-			return Files.createTempDirectory(prefix);
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		}
+		return TestTempDirs.create(prefix);
 	}
 
 	// ---- B1: placement writes the virtual identity into the block entity ----

@@ -36,11 +36,7 @@ public class WorldForgeSurvivalBreakTests {
 	private static final java.util.List<String> report = new java.util.ArrayList<>();
 
 	private static java.nio.file.Path tempDir(String prefix) {
-		try {
-			return Files.createTempDirectory(prefix);
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		}
+		return TestTempDirs.create(prefix);
 	}
 
 	private static boolean forceGameMode(ServerPlayerEntity player, GameMode mode) {

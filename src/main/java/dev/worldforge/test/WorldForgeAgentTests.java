@@ -75,7 +75,7 @@ public class WorldForgeAgentTests {
 	public void testAgentBridgeEndToEnd(TestContext ctx) {
 		final java.nio.file.Path dir;
 		try {
-			dir = Files.createTempDirectory("wf-agent");
+			dir = TestTempDirs.create("wf-agent");
 		} catch (Exception e) {
 			ctx.assertTrue(false, "tempdir: " + e);
 			return;
@@ -457,11 +457,7 @@ public class WorldForgeAgentTests {
 	}
 
 	private static java.nio.file.Path tempDir(String prefix) {
-		try {
-			return java.nio.file.Files.createTempDirectory(prefix);
-		} catch (Exception e) {
-			throw new RuntimeException("tempdir", e);
-		}
+		return TestTempDirs.create(prefix);
 	}
 
 	private static void disconnectQuiet(ServerPlayerEntity p) {

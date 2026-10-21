@@ -268,11 +268,7 @@ public class WorldForgeStudioBusinessTests {
 	// ---- helpers ----
 
 	private static java.nio.file.Path tempDir(TestContext ctx, String prefix) {
-		try {
-			return Files.createTempDirectory(prefix);
-		} catch (Exception e) {
-			throw new RuntimeException("tempdir", e);
-		}
+		return TestTempDirs.create(prefix);
 	}
 
 	private static WorldForgeStudioProtocol.StudioResponse find(

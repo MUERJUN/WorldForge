@@ -38,11 +38,7 @@ import java.util.List;
 public class WorldForgeBlockRegressionTests {
 
 	private static Path tempDir(String prefix) {
-		try {
-			return Files.createTempDirectory(prefix);
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		}
+		return TestTempDirs.create(prefix);
 	}
 
 	private static BlockDefinition def(String id) {
