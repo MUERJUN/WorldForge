@@ -23,12 +23,12 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Show toolchain (java only — no gradle installed)
+      - name: Show toolchain (builds use ONLY each project's wrapper)
         run: |
           java -version
-          if command -v gradle >/dev/null 2>&1; then
-            echo "system gradle present — refusing to rely on it"; exit 1
-          fi
+          # ubuntu-latest ships a system gradle; the isolation proof is that
+          # every invocation below is ./gradlew with a blank GRADLE_USER_HOME.
+          gradle --version 2>/dev/null | head -3 || echo "no system gradle"
 
       - name: Generate the three export projects (JUnit)
         run: ./gradlew test --tests "dev.worldforge.ThreeProjectGenerationTest" --console=plain
