@@ -83,4 +83,20 @@ Studio → 「AI 设置」→ 填入服务商（DeepSeek / OpenAI 兼容）、UR
 
 ## 兼容性说明
 
-以上 AI 生成示例使用本地测试服务验证通过；真实 DeepSeek/OpenAI 服务的兼容性待公测用户反馈。导出 JAR 的行为等价性由 8 项自动化 GameTest + 真实客户端 51 项验收保障（含真实构建与安装验证）。
+以上 AI 生成示例使用本地测试服务验证通过；真实 DeepSeek/OpenAI 服务的兼容性待公测用户反馈。
+
+### 平台验证矩阵（v0.6.0 门禁）
+
+不同验收等级严格区分，**不得混淆**：
+
+| 平台 | 导出构建 | headless GameTest | 图形客户端 GUI | 结论 |
+|------|---------|-------------------|---------------|------|
+| **Windows 11** | ✅ 真实 Gradle 构建 3 工程 | ✅ 8/8、11/11、5/5 | ✅ 隔离实例 51/51（真实 JAR 构建） | **完整验证** |
+| **Linux** | ✅ GitHub Actions（wrapper-only + 空白 GRADLE_USER_HOME） | ✅ 同 CI 内 3 工程 GameTest | ❌ 未运行图形客户端 | **导出构建已验证；GUI 未验证** |
+| **macOS** | ❌ | ❌ | ❌ | **未验证**（无可用环境） |
+
+- **Linux CI 证据**：run [39520762702](https://github.com/MUERJUN/WorldForge/actions/runs/39520762702) · commit `09c94ff` · ubuntu-latest · Temurin 21。构建仅经各工程自身 `./gradlew`，隔离空白 Gradle home，证明不依赖系统 Gradle 或预装缓存。
+- Linux 的"已验证"**仅指导出器在无图形界面的 CI 上能生成并构建可用 Mod JAR，且导出的 Mod 能被 Fabric 加载并通过 GameTest**；**不代表** Linux 上的 WorldForge 图形客户端（Studio/AI/导出 GUI）已通过人工或自动化验收。
+- macOS 因无可用 Runner 环境，整条链路均未验证，公测用户如遇 macOS 问题请优先反馈。
+
+导出 JAR 的行为等价性由 8 项自动化 GameTest + Windows 真实客户端 51 项验收 + Linux CI 三工程真实构建与加载共同保障。
