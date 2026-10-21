@@ -69,12 +69,18 @@ public final class DefinitionStore {
 	}
 
 	/**
-	 * Parse WITHOUT side effects: never moves the file aside and never
-	 * reports a corrupt file as "empty project". Callers must keep their
-	 * current runtime state when {@code ok == false} (issue #3: /wf reload
-	 * against a damaged file used to wipe live definitions).
+	 * Parse after repairing any interrupted transaction (v0.6.0 P0-2). Never
+	 * moves a merely-corrupt (non-pending) file aside and never reports a
+	 * corrupt file as "empty project". Callers must keep their current runtime
+	 * state when {@code ok == false} (issue #3: /wf reload against a damaged
+	 * file used to wipe live definitions).
 	 */
 	public LoadResult tryLoad() {
+		try {
+			dev.worldforge.persistence.AtomicFileWriter.recover(file);
+		} catch (IOException recoveryIssue) {
+			return LoadResult.failed("pending transaction unrecoverable: " + recoveryIssue);
+		}
 		if (!exists()) {
 			// no file yet: a legitimately empty project (first run) is OK
 			return LoadResult.ok(List.of());
@@ -120,6 +126,12 @@ public final class DefinitionStore {
 	 * everything else that is not exactly well-formed => failed with cause.
 	 */
 	public LoadResult tryLoadStrict() {
+		// v0.6.0 P0-2: repair an interrupted transaction before reading
+		try {
+			dev.worldforge.persistence.AtomicFileWriter.recover(file);
+		} catch (IOException recoveryIssue) {
+			return LoadResult.failed("pending transaction unrecoverable: " + recoveryIssue);
+		}
 		if (!exists()) {
 			return LoadResult.ok(List.of()); // fresh world: legit empty project
 		}
@@ -207,6 +219,13 @@ public final class DefinitionStore {
 	public LenientLoad tryLoadLenient() {
 		List<String> skipped = new ArrayList<>();
 		List<ItemDefinition> out = new ArrayList<>();
+		// v0.6.0 P0-2: repair an interrupted transaction before reading
+		try {
+			dev.worldforge.persistence.AtomicFileWriter.recover(file);
+		} catch (IOException recoveryIssue) {
+			skipped.add("pending transaction unrecoverable: " + recoveryIssue);
+			return new LenientLoad(out, skipped);
+		}
 		if (!exists()) {
 			return new LenientLoad(out, skipped);
 		}
@@ -305,53 +324,16 @@ public final class DefinitionStore {
 		root.add("items", arr);
 
 		try {
-			Files.createDirectories(file.getParent());
-			Path tmp = file.resolveSibling(FILE_NAME + ".tmp");
-			Files.writeString(tmp, WorldForge.GSON.toJson(root), StandardCharsets.UTF_8);
-			try {
-				Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-			} catch (AtomicMoveNotSupportedException e) {
-				try {
-					Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
-				} catch (IOException nonAtomicFailure) {
-					degradeCopy(tmp, file, nonAtomicFailure);
-				}
-			} catch (IOException moveFailure) {
-				degradeCopy(tmp, file, moveFailure);
-			}
+			// v0.6.0 P0-2: transactional commit — the sole live file is never
+			// destroyed by a half-finished write; a crash leaves a recoverable
+			// journal + tmp/bak that load() repairs.
+			AtomicFileWriter.commit(file, WorldForge.GSON.toJson(root));
 			lastError = null;
 			return true;
 		} catch (IOException | RuntimeException e) {
 			lastError = e.getClass().getSimpleName() + ": " + e.getMessage();
 			WorldForge.LOGGER.error("[WorldForge] FAILED to save definitions (previous file kept): {}", e.toString());
 			return false;
-		}
-	}
-
-	/**
-	 * v0.5.7: rename() can be refused on some Windows locations (TEMP
-	 * junctions, antivirus) while the directory itself IS writable — in that
-	 * case copy+delete still preserves the atomic-ish save. But when the
-	 * directory is genuinely unwritable (the disk-failure tests delete the
-	 * target or lock the file), copy fails too and we keep the failure signal.
-	 */
-	private static void degradeCopy(Path tmp, Path file, IOException cause) throws IOException {
-		// writability probe: can we open the target for append/create?
-		boolean dirWritable;
-		try (var ch = Files.newByteChannel(file,
-				java.nio.file.StandardOpenOption.CREATE,
-				java.nio.file.StandardOpenOption.WRITE)) {
-			dirWritable = true;
-		} catch (IOException probeFailure) {
-			dirWritable = false;
-		}
-		if (!dirWritable) {
-			throw cause; // genuine disk failure — keep the error signal
-		}
-		Files.copy(tmp, file, StandardCopyOption.REPLACE_EXISTING);
-		try {
-			Files.deleteIfExists(tmp);
-		} catch (IOException ignored) {
 		}
 	}
 

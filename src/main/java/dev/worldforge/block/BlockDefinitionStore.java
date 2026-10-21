@@ -73,6 +73,12 @@ public final class BlockDefinitionStore {
 
 	/** strict: any anomaly rejects the entire file (never a silent partial load) */
 	public LoadResult tryLoadStrict() {
+		// v0.6.0 P0-2: repair an interrupted transaction before reading
+		try {
+			dev.worldforge.persistence.AtomicFileWriter.recover(file());
+		} catch (java.io.IOException recoveryIssue) {
+			return LoadResult.failed("pending transaction unrecoverable: " + recoveryIssue);
+		}
 		if (!exists()) {
 			return LoadResult.ok(List.of());
 		}
@@ -129,6 +135,12 @@ public final class BlockDefinitionStore {
 
 	/** lenient: skip broken entries but report each one (first-start recovery only) */
 	public LenientLoad tryLoadLenient() {
+		// v0.6.0 P0-2: repair an interrupted transaction before reading
+		try {
+			dev.worldforge.persistence.AtomicFileWriter.recover(file());
+		} catch (java.io.IOException recoveryIssue) {
+			return new LenientLoad(new ArrayList<>(), List.of("pending transaction unrecoverable: " + recoveryIssue));
+		}
 		List<BlockDefinition> out = new ArrayList<>();
 		List<String> skipped = new ArrayList<>();
 		if (!exists()) {
