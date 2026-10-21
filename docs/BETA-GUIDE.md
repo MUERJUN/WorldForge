@@ -11,7 +11,7 @@
 | 依赖 | Fabric API **0.116.5+1.21.1** |
 | Java | **21**（运行 MC 与导出构建都必须） |
 | 磁盘 | 至少 2 GB（导出构建的 Gradle 缓存约 1 GB） |
-| 网络 | 首次导出需联网下载 Gradle + Fabric Loom 依赖（约 100-200 MB，视网络 2-10 分钟） |
+| 网络 | 首次导出需联网下载 Gradle + Fabric Loom 依赖（约 100-200 MB，视网络 2-20 分钟） |
 | AI 功能（可选） | 一个 DeepSeek 或 OpenAI API Key |
 
 ## 安装（3 步）
@@ -91,7 +91,8 @@ AI: 好了，右键会召唤闪电，冷却 5 秒。
 
 - 导出生成完整 Gradle 工程（Gradle 8.14.3 + Fabric Loom 1.12.7），**构建工具自动按需下载**，不依赖你机器上的 Gradle。
 - 需要 Java 21：导出前会自动检查 `java -version`。
-- 构建超时 10 分钟；取消/失败/超时会清理半成品 JAR，绝不留下"看似成功"的文件。
+- 构建超时 20 分钟（v0.7.0 从 10 分钟上调：首次导出要下载 Gradle 发行版、Fabric Loom、
+  Minecraft 与映射，慢网络下十分钟不够）；取消/失败/超时会清理半成品 JAR，绝不留下"看似成功"的文件。
 - 完整源码工程保留在输出目录，方便二次开发。
 
 ## 常见问题
@@ -105,7 +106,7 @@ AI: 好了，右键会召唤闪电，冷却 5 秒。
 | 聊到一半断了线 | 会话历史在 `<GameDir>/worldforge/chats/`；待确认的操作在断线时**自动取消**，世界不会半改 |
 | 客户端启动就崩 | 多半是**系统盘满**（构建缓存）。把 `GRADLE_USER_HOME` 换到项目盘再试 |
 | 导出报"Java 编译环境不可用" | 安装 [JDK 21](https://adoptium.net/) 并确保 `java -version` 显示 21.x |
-| 导出构建超时/失败 | 首次构建需下载依赖（2-10 分钟）；失败后重试即可，已下载部分会复用。查看源码工程 `build.gradle` 排查 |
+| 导出构建超时/失败 | 首次构建需下载依赖（2-20 分钟，v0.7.0 上限为 20 分钟）；失败后重试即可，已下载部分会复用。查看源码工程 `build.gradle` 排查 |
 | 朋友用导出 JAR 报缺依赖 | 朋友也需要安装 Fabric API（这是 Fabric Mod 的标准依赖，不是 WorldForge） |
 | AI 设置报 401/超时 | 检查 API Key 与网络；DeepSeek URL 填 `https://api.deepseek.com`，OpenAI 填 `https://api.openai.com` |
 | 闪电/效果不触发 | 检查冷却是否未到；单人世界确认不是冒险模式 |

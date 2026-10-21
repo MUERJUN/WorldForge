@@ -38,7 +38,19 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ExportExecutor {
 
 	/** Build timeout in minutes. */
-	static final long BUILD_TIMEOUT_MINUTES = 10;
+	/**
+	 * How long a build may run before it is killed and the artifacts are
+	 * cleaned up.
+	 *
+	 * <p>v0.7.0: raised from 10 to 20 minutes. The FIRST export on a cold
+	 * machine has to download the Gradle distribution, the Fabric Loom plugin,
+	 * Minecraft and the mappings before the build can even start compiling —
+	 * on a slow connection that easily exceeds ten minutes, and the export
+	 * then failed for a reason that has nothing to do with the user's mod. A
+	 * build that really hangs is still stopped, and the produced JARs are
+	 * still deleted.</p>
+	 */
+	static final long BUILD_TIMEOUT_MINUTES = 20;
 
 	/** Terminal result states — mutually exclusive and auditable. */
 	public enum TerminalState { OK, CANCELLED, TIMEOUT, FAILED }

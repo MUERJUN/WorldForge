@@ -53,10 +53,10 @@ public class WorldForgeChatExportTests {
 	 *
 	 * <p>A cold Gradle build of the exported project downloads the Gradle
 	 * distribution and the Fabric dependencies, so it can take anywhere from
-	 * one to several minutes. 12000 ticks = 10 minutes, which is generous
+	 * one to several minutes. 26000 ticks = 21 minutes, which is generous
 	 * enough for a cold CI runner and bounded enough to fail instead of hang.</p>
 	 */
-	private static final long BUILD_WAIT_TICKS = 12_000;
+	private static final long BUILD_WAIT_TICKS = 26_000;
 
 	/** how long the first wait lasts (the report + the confirmation) */
 	private static final long FIRST_WAIT_TICKS = 120;
