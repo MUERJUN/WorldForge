@@ -1,7 +1,5 @@
 package dev.worldforge.test;
 
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import dev.worldforge.ai.AgentConfig;
 import dev.worldforge.ai.AgentOrchestrator;
 import dev.worldforge.ai.ChatTurn;
@@ -10,7 +8,6 @@ import dev.worldforge.block.BlockDefinition;
 import dev.worldforge.block.BlockDefinitionStore;
 import dev.worldforge.block.BlockRuntimeManager;
 import dev.worldforge.block.DynamicBlockEntity;
-import dev.worldforge.definition.BehaviorDefinition;
 import dev.worldforge.definition.ItemDefinition;
 import dev.worldforge.definition.TextureSource;
 import dev.worldforge.item.DynamicItem;
@@ -24,14 +21,11 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.test.GameTest;
 import net.minecraft.test.TestContext;
-import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BooleanSupplier;
 
 /**
  * v0.7.0 the two real player flows, end to end, as GameTests.
@@ -48,24 +42,25 @@ import java.util.function.BooleanSupplier;
  * tested for real is the whole agent chain — preparation, confirmation,
  * permission re-check, execution, persistence and the resulting MINECRAFT
  * behaviour. The assertions check actual game state, never the chat text.</p>
+ *
+ * <p><b>Why one long wait instead of a poll loop.</b> The GameTest scheduler
+ * keeps its pending tasks in a map that the runner iterates WHILE the task
+ * runs, so a task that re-schedules itself from inside the runner corrupts
+ * that iteration and the chain silently dies. Each flow therefore waits ONCE
+ * for the time its own work needs and then asserts — no self-rescheduling,
+ * nothing to corrupt.</p>
  */
 public class WorldForgeChatFlowTests {
+
+	/** how long flow A and B may take (ticks; 100 = 5 seconds) */
+	private static final long FLOW_WAIT_TICKS = 100;
 
 	/** records every event the agent produced */
 	private static final class Recorder implements AgentOrchestrator.AgentEventSink {
 		final List<ToolEvent> events = new CopyOnWriteArrayList<>();
-		final List<String> messages = new CopyOnWriteArrayList<>();
-		final AtomicBoolean done = new AtomicBoolean(false);
 
 		@Override
 		public void onMessage(String conversationId, String role, String text) {
-			messages.add(role + ": " + text);
-			if ("assistant".equals(role)) {
-				// the turn is finished only when the ASSISTANT produced its
-				// final answer — a successful intermediate tool must not end
-				// the wait, or the assertions would run mid-flight
-				done.set(true);
-			}
 		}
 
 		@Override
@@ -75,25 +70,6 @@ public class WorldForgeChatFlowTests {
 
 		@Override
 		public void onStatus(String conversationId, String status, String detail) {
-			if ("done".equals(status) || "error".equals(status)) {
-				done.set(true);
-			}
-		}
-
-		/** a compact dump of every event, for failure diagnostics */
-		String dump() {
-			StringBuilder sb = new StringBuilder();
-			for (ToolEvent e : events) {
-				sb.append(" | ").append(e.status()).append(" ").append(e.toolName())
-						.append(" -> ").append(e.summary());
-				if (!e.errorCode().isBlank()) {
-					sb.append(" (").append(e.errorCode()).append(')');
-				}
-			}
-			for (String m : messages) {
-				sb.append(" | ").append(m);
-			}
-			return sb.toString();
 		}
 
 		/** the confirmation that is currently waiting, or null */
@@ -104,6 +80,19 @@ public class WorldForgeChatFlowTests {
 				}
 			}
 			return null;
+		}
+
+		/** a compact dump for failure diagnostics */
+		String dump() {
+			StringBuilder sb = new StringBuilder();
+			for (ToolEvent e : events) {
+				sb.append(" | ").append(e.status()).append(" ").append(e.toolName())
+						.append(" -> ").append(e.summary());
+				if (!e.errorCode().isBlank()) {
+					sb.append(" (").append(e.errorCode()).append(')');
+				}
+			}
+			return sb.toString();
 		}
 	}
 
@@ -116,24 +105,6 @@ public class WorldForgeChatFlowTests {
 
 	private static AgentConfig cfg() {
 		return new AgentConfig(true, "http://mock", "mock", "sk-test", 30, 500, 0, 100, 12, 300);
-	}
-
-	/**
-	 * Polls the recorder until the condition holds, then runs the action.
-	 *
-	 * <p>The server thread must never block: the agent loop runs on a worker
-	 * thread and needs the server thread to execute its tools.</p>
-	 */
-	private static void await(TestContext ctx, int attempts, BooleanSupplier ready, Runnable then) {
-		if (ready.getAsBoolean()) {
-			then.run();
-			return;
-		}
-		if (attempts <= 0) {
-			ctx.assertTrue(false, "timed out waiting for the agent");
-			return;
-		}
-		ctx.waitAndRun(2, () -> await(ctx, attempts - 1, ready, then));
 	}
 
 	// =============================================================== flow A
@@ -174,42 +145,50 @@ public class WorldForgeChatFlowTests {
 		String conversationId = "flow-a";
 		AgentOrchestrator.send(server, player, conversationId, "让它右键召唤加速", null, recorder);
 
-		// wait for the confirmation, then approve it
-		await(ctx, 200, () -> recorder.pending() != null, () -> {
+		// one wait: long enough for the whole scripted turn
+		ctx.waitAndRun(FLOW_WAIT_TICKS, () -> {
 			var pending = recorder.pending();
-			ctx.assertTrue(pending != null, "the agent must ask for a confirmation");
+			ctx.assertTrue(pending != null, "the agent must ask for a confirmation " + recorder.dump());
+			if (pending == null) {
+				return;
+			}
 			ctx.assertTrue(pending.summary().contains(id),
 					"the confirmation must name the affected item: " + pending.summary());
 			boolean ok = AgentOrchestrator.confirm(player.getUuid(), conversationId,
 					pending.confirmationId());
 			ctx.assertTrue(ok, "the confirmation must be accepted");
-		});
 
-		await(ctx, 200, recorder.done::get, () -> {
-			// --- the DEFINITION really changed ---
-			var def = WorldForgeRuntimeManager.get(id);
-			ctx.assertTrue(def != null, "the definition must still exist");
-			ctx.assertTrue(def.behaviors().size() == 1,
-					"the behaviour must really be on the definition, got " + def.behaviors() + recorder.dump());
-			var behavior = def.behaviors().get(0);
-			ctx.assertTrue("right_click".equals(behavior.trigger()),
-					"the trigger must be right_click, got " + behavior.trigger());
-			ctx.assertTrue(behavior.actions().contains("apply_effect"),
-					"the action must be apply_effect, got " + behavior.actions());
+			// the update tool runs on the server thread; give it a moment and
+			// then check the REAL state
+			ctx.waitAndRun(20, () -> {
+				var def = WorldForgeRuntimeManager.get(id);
+				ctx.assertTrue(def != null, "the definition must still exist");
+				ctx.assertTrue(def.behaviors().size() == 1,
+						"the behaviour must really be on the definition, got " + def.behaviors()
+								+ recorder.dump());
+				if (def.behaviors().isEmpty()) {
+					return;
+				}
+				var behavior = def.behaviors().get(0);
+				ctx.assertTrue("right_click".equals(behavior.trigger()),
+						"the trigger must be right_click, got " + behavior.trigger());
+				ctx.assertTrue(behavior.actions().contains("apply_effect"),
+						"the action must be apply_effect, got " + behavior.actions());
 
-			// --- and it REALLY WORKS in the world ---
-			player.removeStatusEffect(StatusEffects.SPEED);
-			ItemStack held = player.getMainHandStack();
-			ctx.assertTrue(held != null && !held.isEmpty(), "the player must still hold the weapon");
-			var vid = DynamicItem.virtualIdOf(held);
-			ctx.assertTrue(vid != null && vid.id().equals(id), "the held stack must be the virtual weapon");
+				// --- and it REALLY WORKS in the world ---
+				player.removeStatusEffect(StatusEffects.SPEED);
+				ItemStack held = player.getMainHandStack();
+				ctx.assertTrue(held != null && !held.isEmpty(), "the player must still hold the weapon");
+				var vid = DynamicItem.virtualIdOf(held);
+				ctx.assertTrue(vid != null && vid.id().equals(id),
+						"the held stack must be the virtual weapon");
 
-			dev.worldforge.behavior.BehaviorEngine.onRightClick(
-					ctx.getWorld(), player, held, Hand.MAIN_HAND);
-			ctx.assertTrue(player.hasStatusEffect(StatusEffects.SPEED),
-					"right-clicking the weapon must really apply the effect");
-
-			ctx.complete();
+				dev.worldforge.behavior.BehaviorEngine.onRightClick(
+						ctx.getWorld(), player, held, net.minecraft.util.Hand.MAIN_HAND);
+				ctx.assertTrue(player.hasStatusEffect(StatusEffects.SPEED),
+						"right-clicking the weapon must really apply the effect");
+				ctx.complete();
+			});
 		});
 	}
 
@@ -243,14 +222,13 @@ public class WorldForgeChatFlowTests {
 		// height, and aim at its centre (eye height 1.62 above the feet)
 		java.util.function.Consumer<ServerPlayerEntity> aim = p -> {
 			p.setPosition(abs.getX() + 3.5, abs.getY() + 0.5, abs.getZ() + 0.5);
-			// the player stands EAST of the block, so it must look WEST (-X)
-			// NB: the look ray uses headYaw (LivingEntity.getYaw(tickDelta)),
-			// not the plain yaw field, so both have to be set.
+			// the look ray uses headYaw (LivingEntity.getYaw(tickDelta) returns
+			// the head yaw, not the plain yaw field), so both have to be set
 			p.setYaw(90.0f);
 			p.setHeadYaw(90.0f);
 			p.prevYaw = 90.0f;
 			p.prevHeadYaw = 90.0f;
-			p.setPitch(28.0f); // look down at the block's centre
+			p.setPitch(28.0f);
 			p.prevPitch = 28.0f;
 		};
 		aim.accept(player);
@@ -268,23 +246,14 @@ public class WorldForgeChatFlowTests {
 		var recorder = new Recorder();
 		String conversationId = "flow-b";
 		aim.accept(player);
-		// DIAGNOSTIC: what does the raycast actually see right now?
-		// sanity: the player must really be aiming at the block, otherwise the
-		// flow would be testing "no target" instead of "modify the target"
-		var probe = player.raycast(6.0, 1.0f, false);
-		ctx.assertTrue(probe.getType() != net.minecraft.util.hit.HitResult.Type.MISS,
-				"the player must be aiming at the block: pos=" + player.getPos()
-						+ " eye=" + player.getEyePos() + " headYaw=" + player.getHeadYaw()
-						+ " pitch=" + player.getPitch() + " block=" + abs);
 		AgentOrchestrator.send(server, player, conversationId, "让这个方块右键时给我加速", null, recorder);
 
-		await(ctx, 200, () -> {
-			// the server may move a mock player between ticks, so keep aiming
-			aim.accept(player);
-			return recorder.pending() != null;
-		}, () -> {
+		ctx.waitAndRun(FLOW_WAIT_TICKS, () -> {
 			var pending = recorder.pending();
-			ctx.assertTrue(pending != null, "the agent must ask for a confirmation");
+			ctx.assertTrue(pending != null, "the agent must ask for a confirmation " + recorder.dump());
+			if (pending == null) {
+				return;
+			}
 			ctx.assertTrue(pending.summary().contains(id),
 					"the confirmation must name the affected block: " + pending.summary());
 			ctx.assertTrue(pending.summary().contains("共享定义") || pending.summary().contains("影响"),
@@ -292,37 +261,41 @@ public class WorldForgeChatFlowTests {
 			boolean ok = AgentOrchestrator.confirm(player.getUuid(), conversationId,
 					pending.confirmationId());
 			ctx.assertTrue(ok, "the confirmation must be accepted");
-		});
 
-		await(ctx, 200, recorder.done::get, () -> {
-			// --- the DEFINITION really changed ---
-			var def = BlockRuntimeManager.get(id);
-			ctx.assertTrue(def != null, "the block definition must still exist");
-			ctx.assertTrue(def.behaviors().size() == 1,
-					"the behaviour must really be on the definition, got " + def.behaviors() + recorder.dump());
-			ctx.assertTrue(def.behaviors().get(0).actions().contains("apply_effect"),
-					"the action must be apply_effect, got " + def.behaviors().get(0).actions());
+			ctx.waitAndRun(20, () -> {
+				// --- the DEFINITION really changed ---
+				var def = BlockRuntimeManager.get(id);
+				ctx.assertTrue(def != null, "the block definition must still exist");
+				ctx.assertTrue(def.behaviors().size() == 1,
+						"the behaviour must really be on the definition, got " + def.behaviors()
+								+ recorder.dump());
+				if (def.behaviors().isEmpty()) {
+					return;
+				}
+				ctx.assertTrue(def.behaviors().get(0).actions().contains("apply_effect"),
+						"the action must be apply_effect, got " + def.behaviors().get(0).actions()
+								+ recorder.dump());
 
-			// --- and it REALLY WORKS in the world ---
-			player.removeStatusEffect(StatusEffects.SPEED);
-			// the same entry point the block's onUse delegates to
-			var liveBe = (DynamicBlockEntity) ctx.getWorld().getBlockEntity(abs);
-			var liveDef = BlockRuntimeManager.get(id);
-			var result = dev.worldforge.block.BlockBehaviorEngine.onUse(ctx.getWorld(), abs,
-					player, liveDef, liveBe);
-			ctx.assertTrue(result != null, "using the block must return a result");
-			ctx.assertTrue(player.hasStatusEffect(StatusEffects.SPEED),
-					"using the block must really apply the effect");
+				// --- and it REALLY WORKS in the world ---
+				player.removeStatusEffect(StatusEffects.SPEED);
+				var liveBe = (DynamicBlockEntity) ctx.getWorld().getBlockEntity(abs);
+				var liveDef = BlockRuntimeManager.get(id);
+				// the same entry point the block's onUse delegates to
+				var result = dev.worldforge.block.BlockBehaviorEngine.onUse(ctx.getWorld(), abs,
+						player, liveDef, liveBe);
+				ctx.assertTrue(result != null, "using the block must return a result");
+				ctx.assertTrue(player.hasStatusEffect(StatusEffects.SPEED),
+						"using the block must really apply the effect");
 
-			// --- and the change SURVIVES a save/reload ---
-			var store = new BlockDefinitionStore(dir);
-			var reloaded = store.tryLoadStrict();
-			ctx.assertTrue(reloaded.ok(), "the block file must still load: " + reloaded.error());
-			ctx.assertTrue(reloaded.definitions().size() == 1, "the block must still be there");
-			ctx.assertTrue(reloaded.definitions().get(0).behaviors().size() == 1,
-					"the behaviour must have been persisted");
-
-			ctx.complete();
+				// --- and the change SURVIVES a save/reload ---
+				var store = new BlockDefinitionStore(dir);
+				var reloaded = store.tryLoadStrict();
+				ctx.assertTrue(reloaded.ok(), "the block file must still load: " + reloaded.error());
+				ctx.assertTrue(reloaded.definitions().size() == 1, "the block must still be there");
+				ctx.assertTrue(reloaded.definitions().get(0).behaviors().size() == 1,
+						"the behaviour must have been persisted");
+				ctx.complete();
+			});
 		});
 	}
 }

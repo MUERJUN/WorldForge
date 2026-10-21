@@ -439,7 +439,8 @@ public final class AgentOrchestrator {
 					"{\"ok\":false,\"error_code\":\"" + auth + "\",\"message\":\"确认后权限校验失败\"}");
 		}
 		ToolContext scoped = base.withScope(ToolContext.ToolScope.mutating(conversationId,
-				prep.itemIds(), prep.blockIds()));
+				prep.itemIds(), prep.blockIds()))
+				.withConfirmedSummary(prep.summary());
 		String scopeErr = PermissionGate.checkScope(scoped, prep.itemIds(), prep.blockIds());
 		if (scopeErr != null) {
 			sink.onToolEvent(event(conversationId, requestId, request.toolCallId(), request.toolName(),

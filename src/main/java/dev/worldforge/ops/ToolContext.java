@@ -21,6 +21,11 @@ import java.util.UUID;
  * @param dimension       the dimension key of {@code world}
  * @param conversationId  the conversation the call belongs to
  * @param scope           the authorization scope granted for this call
+ * @param confirmedSummary the operation summary the player explicitly
+ *                         approved; empty when the call needed no approval.
+ *                         A tool that has extra conditions (for example the
+ *                         exporter's degradation consent) checks THIS, not
+ *                         the model's own description.
  */
 public record ToolContext(
 		ServerPlayerEntity player,
@@ -28,7 +33,18 @@ public record ToolContext(
 		ServerWorld world,
 		RegistryKey<net.minecraft.world.World> dimension,
 		String conversationId,
-		ToolScope scope) {
+		ToolScope scope,
+		String confirmedSummary) {
+
+	public ToolContext {
+		confirmedSummary = confirmedSummary == null ? "" : confirmedSummary;
+	}
+
+	/** A context for a call that needs no approval. */
+	public ToolContext(ServerPlayerEntity player, MinecraftServer server, ServerWorld world,
+			RegistryKey<net.minecraft.world.World> dimension, String conversationId, ToolScope scope) {
+		this(player, server, world, dimension, conversationId, scope, "");
+	}
 
 	/**
 	 * What a single tool call is allowed to touch. A WRITE call may only
@@ -61,7 +77,14 @@ public record ToolContext(
 
 	/** A copy of this context with a different authorization scope. */
 	public ToolContext withScope(ToolScope newScope) {
-		return new ToolContext(player, server, world, dimension, conversationId, newScope);
+		return new ToolContext(player, server, world, dimension, conversationId, newScope,
+				confirmedSummary);
+	}
+
+	/** A copy of this context that carries the summary the player approved. */
+	public ToolContext withConfirmedSummary(String summary) {
+		return new ToolContext(player, server, world, dimension, conversationId, scope,
+				summary == null ? "" : summary);
 	}
 
 	public UUID playerId() {

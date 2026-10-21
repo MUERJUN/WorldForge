@@ -23,6 +23,7 @@ import dev.worldforge.ops.ToolResult;
 import dev.worldforge.runtime.WorldForgeRuntimeManager;
 import dev.worldforge.workspace.WorkspaceManager;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -61,7 +62,9 @@ public final class ExportModTool {
 		props.add("mod_id", JsonSchemaValidator.prop("string", "导出 mod 的 id，例如 my_thunder_mod"));
 		props.add("mod_name", JsonSchemaValidator.prop("string", "导出 mod 的显示名称"));
 		props.add("version", JsonSchemaValidator.prop("string", "mod 版本号，例如 1.0.0"));
-		JsonObject schema = JsonSchemaValidator.object(props, List.of("item_ids", "block_ids", "mod_id"));
+		// only the mod id is REQUIRED: exporting items only, or blocks only, must
+		// both be possible (the tool checks that at least one id is given)
+		JsonObject schema = JsonSchemaValidator.object(props, List.of("mod_id"));
 		return ToolDescriptor.longRunningAdmin(NAME,
 				"把选定的物品和方块构建成一个独立的 Fabric Mod JAR。会真的运行 Gradle 构建，"
 						+ "过程中会在聊天里显示真实进度；完成后给出 JAR 名称和工作区中的相对位置。",
@@ -95,7 +98,9 @@ public final class ExportModTool {
 			}
 		}
 
-		Path outDir = WorkspaceManager.exportsDir();
+		// the exporter refuses to write into a directory that is not empty, so
+		// every export gets its OWN fresh directory under the workspace
+		Path outDir = freeExportDir(modId);
 		String outDirText = outDir.toString();
 
 		// --- create the immutable plan ON THE SERVER THREAD ---
@@ -132,13 +137,28 @@ public final class ExportModTool {
 		}
 
 		// --- the exporter's own guard: never export a degraded plan silently ---
-		String degraded = ModExporter.degradedGuardError(plan.report(), plan.degradedExportConfirmed());
+		// The consent must come from the summary the player ACTUALLY approved:
+		// every lost capability has to be named in it. A model that says
+		// "the user accepted the degradation" cannot unlock this.
+		ExportPlan exportPlan = plan;
+		if (!plan.report().lost().isEmpty()) {
+			String approved = ctx.confirmedSummary() == null ? "" : ctx.confirmedSummary();
+			boolean allNamed = plan.report().lost().stream().allMatch(approved::contains);
+			if (!allNamed) {
+				return ToolResult.fail("degraded_not_confirmed",
+						"有 " + plan.report().lost().size() + " 项能力无法导出，"
+								+ "但玩家批准的摘要里没有说明这些损失，因此已阻止导出。");
+			}
+			exportPlan = plan.withDegradedConfirmation();
+		}
+		String degraded = ModExporter.degradedGuardError(exportPlan.report(),
+				exportPlan.degradedExportConfirmed());
 		if (degraded != null) {
 			return ToolResult.fail("degraded_not_confirmed", degraded);
 		}
 
 		// --- run the build on THIS (worker) thread, never the server thread ---
-		ExportExecutor executor = new ExportExecutor(plan);
+		ExportExecutor executor = new ExportExecutor(exportPlan);
 		Thread progress = startProgressReporter(executor, sink, request);
 		ModExporter.ExportResult result;
 		try {
@@ -261,6 +281,28 @@ public final class ExportModTool {
 		t.setDaemon(true);
 		t.start();
 		return t;
+	}
+
+	/**
+	 * Finds a free directory for one export.
+	 *
+	 * <p>The exporter refuses a non-empty output directory (so it can never
+	 * overwrite an earlier export), which is why each run gets its own
+	 * {@code <modId>}, {@code <modId>-2}, ... slot under the workspace.</p>
+	 */
+	private static Path freeExportDir(String modId) {
+		Path base = WorkspaceManager.exportsDir();
+		String safe = modId == null || modId.isBlank() ? "export" : modId.replaceAll("[^a-zA-Z0-9_-]", "_");
+		Path candidate = base.resolve(safe);
+		int n = 2;
+		while (Files.exists(candidate)) {
+			candidate = base.resolve(safe + "-" + n);
+			n++;
+			if (n > 1000) {
+				break;
+			}
+		}
+		return candidate;
 	}
 
 	/** The artifact path relative to the WorldForge workspace, for display. */
