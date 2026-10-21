@@ -163,6 +163,14 @@ public final class AgentBridge {
 		return config;
 	}
 
+	/**
+	 * v0.7.0: the raw provider, for the agent orchestrator. Returns null when
+	 * the agent is disabled. The provider never leaves the server.
+	 */
+	public static ModelProvider providerForTools() {
+		return provider;
+	}
+
 	public static String providerDescription() {
 		var p = provider;
 		return p == null ? null : p.describe();

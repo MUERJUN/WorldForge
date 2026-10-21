@@ -54,10 +54,14 @@ public class WorldForge implements ModInitializer {
 		WorldForgeBlocks.register(); // v0.4.0: one generic dynamic block + its block entity type
 		WorldForgePayloads.register();
 		dev.worldforge.network.WorldForgeStudioProtocol.register();
+		// v0.7.0: the chat-first protocol and the WF-Ops tool catalogue
+		dev.worldforge.network.WorldForgeChatProtocol.register();
+		dev.worldforge.ops.ToolCatalog.registerAll();
 		WorldForgeEvents.register();
 		WorldForgeCommand.register();
 
 		int slots = dev.worldforge.definition.AppearanceSlots.count();
-		LOGGER.info("WorldForge ready: 1 native dynamic item, {} pre-baked appearance slots", slots);
+		LOGGER.info("[WorldForge] ready: 1 native dynamic item, {} pre-baked appearance slots, {} WF-Ops tools",
+				slots, dev.worldforge.ops.ToolRegistry.all().size());
 	}
 }
