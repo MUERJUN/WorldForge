@@ -70,6 +70,11 @@ fabricApi {
 // exhausted by other apps) the default 2G+ reservation fails to commit.
 tasks.named('runGameTest') {
 	jvmArgs '-Xmx1G'
+	// v0.7.0: the chat-driven export test runs a REAL Gradle build (minutes),
+	// so it is opt-in: pass -PwfChatExport to enable it. The CI enables it.
+	if (project.hasProperty('wfChatExport')) {
+		jvmArgs '-Dworldforge.chat.export.gametest=true'
+	}
 }
 
 dependencies {

@@ -33,6 +33,11 @@ jobs:
       - name: Generate the three export projects (JUnit)
         run: ./gradlew test --tests "dev.worldforge.ThreeProjectGenerationTest" --console=plain
 
+      # v0.7.0 flow C: the chat really drives a standalone-mod build.
+      # The test is opt-in because it runs a REAL Gradle build.
+      - name: Chat-driven export (flow C, real Gradle build)
+        run: ./gradlew runGameTest -PwfChatExport --console=plain
+
       - name: Build + GameTest alpha/beta/gamma on Linux (wrapper-only)
         run: bash scripts/build-three-projects.sh
 

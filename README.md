@@ -1,4 +1,4 @@
-# WorldForge — Minecraft 运行时动态物品与方块引擎 + 游戏内 Studio + AI AgentBridge
+# WorldForge — Minecraft 游戏内 AI 创造助手（Chat-First）
 
 [![build](https://img.shields.io/badge/build-passing-brightgreen)]() [![MC](https://img.shields.io/badge/Minecraft-1.21.1-green)]() [![Loader](https://img.shields.io/badge/Fabric-Loader%200.16.9-blue)]()
 
@@ -7,7 +7,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 - 游戏版本：Minecraft Java **1.21.1**
 - 加载器：Fabric Loader **0.16.9** + Fabric API **0.116.5+1.21.1**
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**
-- 当前版本：**v0.6.0 Public Beta**
+- 当前版本：**v0.7.0 Public Beta**
 
 ---
 
@@ -16,19 +16,94 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 **普通玩家安装（无需开发环境）：**
 
 1. 安装 [Fabric Loader 0.16.9](https://fabricmc.net/use/installer/)，选择 Minecraft **1.21.1**。
-2. 下载 [Fabric API 0.116.5+1.21.1](https://modrinth.com/mod/fabric-api) 与 GitHub Release 的 `worldforge-0.6.0.jar`。
+2. 下载 [Fabric API 0.116.5+1.21.1](https://modrinth.com/mod/fabric-api) 与 GitHub Release 的 `worldforge-0.7.0.jar`。
 3. 把两个 JAR 放入 `.minecraft/mods/`，启动游戏。
-4. 进入单人世界，按 **K** 打开 WorldForge Studio。
+4. 进入单人世界，按 **K** 打开 **AI 聊天**。
+5. 第一次使用先点聊天右上角 **⚙ 设置**，填入 API Key（单人游戏直接生效，重启无效）。
 
-完整图文教程、5 分钟上手示例、能力清单与常见问题见 **[docs/BETA-GUIDE.md](docs/BETA-GUIDE.md)**。
+然后直接用大白话说：
+
+- 「创建一把雷霆之剑，右键召唤闪电，冷却 5 秒」
+- 「让它右键召唤加速」
+- 「把刚才的剑导出成一个独立 Mod」
+
+AI 自己判断该做什么、在游戏里执行，并把**真实发生的每一步**显示在同一条对话里。
+
+> 旧的 WorldForge Studio 仍在 **L** 键（或聊天右上角 ⚙）里，普通玩家不需要进去。
+
+完整图文教程、5 分钟上手示例、能力清单与常见问题见 **[docs/BETA-GUIDE.md](docs/BETA-GUIDE.md)**；
+全部验收门禁的复现命令见 **[docs/ACCEPTANCE-v0.7.0.md](docs/ACCEPTANCE-v0.7.0.md)**。
 
 **开发者构建：**
 
 ```bash
 ./gradlew build           # 编译 + JUnit 全量测试
 ./gradlew runGameTest     # 真实服务端 GameTest
-./gradlew runClient       # 进游戏：按 K 打开 Studio
+./gradlew runClient       # 进游戏：按 K 打开 AI 聊天
 ```
+
+---
+
+## v0.7.0 — Chat-First：按 K 就是聊天
+
+**这一版改掉了 WorldForge 的使用方式：它不再是装进 Minecraft 的简化版 IntelliJ，
+而是存在于游戏里的 AI 创造与行动助手。**
+
+### 你只需要表达想法
+
+| 你说 | AI 做什么 | 你看到 |
+|------|----------|--------|
+| 「给我手里的剑加个右键闪电，冷却 5 秒」 | 读主手身份 → 读原定义 → 生成方案 → **等你确认** → 改 → 存 → 同步 | 每一步都是一条真实消息 |
+| 「让这个方块右键时治疗我」 | 认目标 → 说明**会同时影响所有同 ID 方块** → **等你确认** → 改 → 存 | 明确的共享定义提示 |
+| 「把刚才的雷霆剑导出成一个独立 Mod」 | 能力分析 → **降级确认** → 真跑 Gradle 构建 | 真实构建进度 + JAR 路径 |
+
+### 首页只有这些
+
+聊天记录、输入发送、新建/切换会话、设置入口。
+**没有**物品编辑、方块编辑、导出、Gradle、终端、调试面板。
+
+### WF-Ops：AI 只能调用注册过的 Java 工具
+
+服务端权威的结构化工具层，**不是 shell 替代品**：
+
+| 工具 | 作用 |
+|------|------|
+| `inspect_context` | 玩家所在世界/维度/位置/主手物品/视线目标/服务器能力 |
+| `inspect_definition` | 指定物品或方块的定义与可编辑字段 |
+| `list_capabilities` | 当前支持的操作、约束，以及**明确不能实现的功能** |
+| `check_export_capabilities` | 导出前的保留/转换/丢失报告（不构建） |
+| `create_item` / `update_item` | 创建 / 修改虚拟物品 |
+| `create_block` / `update_block` | 创建 / 修改动态方块 |
+| `inspect_target_block` / `modify_target_block` | 检查 / 修改视线目标方块 |
+| `give_virtual_item` | 把虚拟物品交给玩家 |
+| `export_mod` | 真实构建独立 Mod JAR |
+
+**没有** `run_shell` / `execute_powershell` / `execute_arbitrary_code` 之类的工具。
+
+### 权限不是靠提示词
+
+修改世界的操作：AI 生成意图和受影响对象 → 聊天里展示影响摘要 → 玩家明确确认 →
+**服务端再次校验权限、作用域和目标快照** → 才执行。
+目标在确认期间被改动（换了手持物、方块被拆、别人先改了）就拒绝执行。
+导出降级必须由**玩家批准的摘要**明确写出每一项损失。
+
+### 不会假装成功
+
+工具的成功状态来自真实的服务端执行结果。持久化成功但同步失败会分开显示，
+不会笼统说「全部成功」。AI 也**看不到也不显示**模型的思维链，只有任务计划、
+工具动作和真实结果。
+
+### v0.7.0 已知限制
+
+- **AI 未配置时聊天不可用**：需要 `config/worldforge/agent.json` 里的 API Key。
+- **真实 DeepSeek/OpenAI 的端到端调用尚无独立验收**：本版验收用的是本地脚本化的
+  Mock 模型，**证明的是智能体链路，不是真实服务商的兼容性**。
+- **不能给原版物品附加行为**，也不能改造原版方块：AI 会说明限制并给出替代方案，
+  不会偷偷替换玩家原有的东西。
+- 修改方块定义影响**所有同 ID 实例**（共享定义），聊天里会明确提示。
+- 聊天历史有限额（50 个会话 / 每会话 500 条），可删除；损坏的历史不会被静默覆盖。
+- Linux 仍只验证了无图形导出构建与 Fabric GameTest，**GUI 未验证**；macOS 未验证。
+- 导出构建首次需要联网下载 Gradle 与 Fabric 依赖（约 100–200 MB）。
 
 ---
 
