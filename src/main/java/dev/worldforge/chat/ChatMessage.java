@@ -1,4 +1,4 @@
-package dev.worldforge.client.chat;
+package dev.worldforge.chat;
 
 import com.google.gson.JsonObject;
 

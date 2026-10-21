@@ -1,8 +1,8 @@
 package dev.worldforge.client.gui;
 
 import dev.worldforge.client.chat.ChatClientState;
-import dev.worldforge.client.chat.ChatMessage;
-import dev.worldforge.client.chat.ChatSession;
+import dev.worldforge.chat.ChatMessage;
+import dev.worldforge.chat.ChatSession;
 import dev.worldforge.client.chat.ChatUi;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;

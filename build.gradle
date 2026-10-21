@@ -44,6 +44,14 @@ loom {
 			programArgs "--quickPlaySingleplayer", project.findProperty("wfWorld") ?: "New World"
 			property "worldforge.chat.autotest", "1"
 		}
+		// v0.7.0 flow C: export a standalone mod FROM THE CHAT — a real
+		// Gradle build, so it gets its own run configuration.
+		clientChatExportTest {
+			client()
+			configName = "Minecraft Client (chat export autotest)"
+			programArgs "--quickPlaySingleplayer", project.findProperty("wfWorld") ?: "New World"
+			property "worldforge.chat.export.autotest", "1"
+		}
 	}
 }
 

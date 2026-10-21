@@ -1,4 +1,4 @@
-package dev.worldforge.client.chat;
+package dev.worldforge.chat;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -102,9 +102,16 @@ public final class ChatSession {
 		this.corrupted = corrupted;
 	}
 
-	/** The text of the last N conversational turns, for context restoration. */
+	/**
+	 * The last N conversational turns as a JSON array, for context restoration.
+	 *
+	 * <p>Oldest first, because that is the order a conversation is read in.
+	 * Each entry is built COMPLETELY before it is collected: appending to a
+	 * buffer that something was inserted into would splice the parts of two
+	 * different entries together and produce invalid JSON.</p>
+	 */
 	public String recentContext(int turns) {
-		StringBuilder sb = new StringBuilder();
+		java.util.List<String> parts = new java.util.ArrayList<>();
 		int count = 0;
 		for (int i = messages.size() - 1; i >= 0 && count < turns; i--) {
 			ChatMessage m = messages.get(i);
@@ -112,15 +119,14 @@ public final class ChatSession {
 				continue;
 			}
 			String role = m.role() == ChatMessage.Role.PLAYER ? "user" : "assistant";
-			sb.insert(0, "{\"role\":\"").append(role).append("\",\"text\":\"")
-					.append(escape(m.text())).append("\"},");
+			parts.add("{\"role\":\"" + role + "\",\"text\":\"" + escape(m.text()) + "\"}");
 			count++;
 		}
-		if (sb.length() == 0) {
+		if (parts.isEmpty()) {
 			return "";
 		}
-		sb.setLength(sb.length() - 1);
-		return "[" + sb + "]";
+		java.util.Collections.reverse(parts);
+		return "[" + String.join(",", parts) + "]";
 	}
 
 	private static String escape(String s) {

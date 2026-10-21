@@ -124,6 +124,10 @@ public class WorldForgeClient implements ClientModInitializer {
 		// or -Dworldforge.chat.autotest=true)
 		dev.worldforge.client.dev.ChatAutoTest.register();
 
+		// v0.7.0: chat-driven export acceptance (only active with
+		// -Dworldforge.chat.export.autotest=true) — it runs a REAL Gradle build
+		dev.worldforge.client.dev.ChatExportAutoTest.register();
+
 		WorldForge.LOGGER.info("[WorldForge] client init done (K = AI chat, L = legacy studio)");
 	}
 }

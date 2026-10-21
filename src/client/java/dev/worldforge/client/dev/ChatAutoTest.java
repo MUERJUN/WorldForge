@@ -2,8 +2,8 @@ package dev.worldforge.client.dev;
 
 import dev.worldforge.client.WorldForgeClient;
 import dev.worldforge.client.chat.ChatClientState;
-import dev.worldforge.client.chat.ChatMessage;
-import dev.worldforge.client.chat.ChatSession;
+import dev.worldforge.chat.ChatMessage;
+import dev.worldforge.chat.ChatSession;
 import dev.worldforge.client.gui.WorldForgeChatScreen;
 import dev.worldforge.client.gui.WorldForgeSettingsScreen;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
