@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: 安装与使用文档 / Install & Usage Guide
+    url: https://github.com/MUERJUN/WorldForge/blob/main/docs/BETA-GUIDE.md
+    about: 安装步骤、5 分钟上手示例、能力清单、环境要求、常见问题排查
+
+  - name: 平台验证矩阵 / Platform Support Matrix
+    url: https://github.com/MUERJUN/WorldForge/blob/main/docs/BETA-GUIDE.md#平台验证矩阵v060-门禁
+    about: Windows / Linux / macOS 各自验证到什么程度（GUI 与无图形构建是不同等级）

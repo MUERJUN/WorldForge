@@ -1,5 +1,63 @@
 # 更新日志
 
+## v0.6.0 Public Beta — 正式公测
+
+**首个公开发测版本。** 安装一个 JAR，在 Minecraft 里创建、测试并导出真正可用的独立 Fabric Mod。
+
+### 本版修复（发布门禁）
+
+#### P0-A：无效 Journal 不再绕过校验
+
+- `readExpectedSha` 严格区分三种状态：**缺失**（无待完成事务）、**有效**（格式正确的 sha-256）、**无效**（存在但无法读取/格式损坏）
+- `recover()` 不再使用 `want == null || sha256(..).equals(want)` 这一短路逻辑——无效 Journal **绝不**授权信任 tmp 或 target
+- 无效 Journal 时只允许保守回滚到既有备份；无法确认有效版本时**保留全部恢复证据**（journal/tmp/target/bak）并 fail-closed，允许用户备份与人工检查
+- 旧代码上会失败的测试：`itemMalformedJournalDoesNotTrustTmp`、`itemUnreadableJournalDoesNotTrustTarget`、`blockMalformedJournalDoesNotTrustTmp`、`firstSaveTornTargetNoTmpFailsClosed`
+
+#### P0-B：首次保存失败不再留下半成品目标
+
+- `commit()` 跟踪 `targetTouched`：仅在确实覆盖过目标后才执行回滚
+- **首次保存**（无既有版本）中途失败：只删除本次事务的撕裂产物，**绝不**删除用户原有文件（此前不存在）
+- **回滚本身失败**：保留 journal + bak + tmp，阻止进一步覆盖并抛出明确失败
+- 未触及目标（如备份读取失败）：原文件完好，仅清理事务标记
+- 新增测试：`firstSaveTornTargetNoTmpFailsClosed`、`unwritableTargetBlocksRecoverToo`
+
+#### 持久化耐久性说明
+
+- Journal 写入后会 fsync 文件本身，并尽力 fsync 目录元数据
+- 目录 fsync 在部分平台（Windows）不受支持，因此**不承诺**"任意断电绝不丢失"；仅承诺崩溃后最近一次完整有效版本可恢复
+
+### 验证结果
+
+| 门禁 | 结果 |
+|------|------|
+| 全量 JUnit | **246/246** |
+| WorldForge GameTest | **61/61** |
+| 持久化故障注入 | **16/16**（items.json + blocks.json 双覆盖） |
+| 独立 Mod GameTest | 8/8 |
+| Windows 隔离客户端 | 51/51（真实 JAR 构建） |
+| Linux CI | 见下方平台矩阵 |
+
+### 平台验证矩阵
+
+| 平台 | 导出构建 | headless GameTest | 图形客户端 GUI |
+|------|---------|-------------------|---------------|
+| Windows 11 | ✅ 真实构建 3 工程 | ✅ 8/8、11/11、5/5 | ✅ 隔离实例 51/51 |
+| Linux | ✅ GitHub Actions | ✅ 同 CI 内 | ❌ 未验证 |
+| macOS | ❌ | ❌ | ❌ 未验证 |
+
+### 公测已知限制
+
+- **Minecraft 1.21.1 专用**，跨版本兼容未验证
+- **Linux**：仅验证无图形导出构建与 Fabric GameTest，**GUI 尚未验证**
+- **macOS**：尚未验证
+- **AI 服务商**：真实 DeepSeek/OpenAI 端到端调用尚无独立验收（示例使用本地测试服务）
+- **不是任意 Java 代码生成器**：仅支持白名单动作与触发器
+- **不支持的技能不能保证等价导出**：能力报告明确区分保留/转换/丢失，丢失项需玩家确认
+- 中文 GUI 文案在部分字体环境显示为方块（游戏语言设为简体中文可缓解）
+- 高 GUI Scale（2/3）+ 854×480 小窗口下导出页为压缩布局
+
+---
+
 ## v0.5.7 已发布 — 公测候选质量门禁
 
 ### P0-1: ExportSymbolMapper 全面接通

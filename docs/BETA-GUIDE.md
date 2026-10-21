@@ -1,4 +1,4 @@
-# WorldForge 公测指南（v0.5.7）
+# WorldForge 公测指南（v0.6.0）
 
 > 一个 JAR 装进游戏，在 Minecraft 里创建、测试、导出真正可用的独立 Mod。
 
@@ -19,7 +19,7 @@
 1. 安装 [Fabric Loader](https://fabricmc.net/use/installer/)，选择 1.21.1。
 2. 把两个 JAR 放进 `.minecraft/mods/`：
    - `fabric-api-0.116.5+1.21.1.jar`
-   - `worldforge-0.5.7.jar`
+   - `worldforge-0.6.0.jar`
 3. 启动游戏。进世界后按 **K** 打开 WorldForge Studio。
 
 ## 5 分钟上手：造一把会召唤闪电的雷霆之剑

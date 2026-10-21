@@ -43,9 +43,11 @@ def patch(path, subs):
     else:
         print("no change", path)
 
-# line-scoped, non-greedy replacements ONLY (never cross a newline)
+# line-scoped, non-greedy replacements ONLY (never cross a newline).
+# The status suffix (已发布 / Public Beta / …) is PRESERVED — the script only
+# swaps the version number, so wording edits are never clobbered.
 patch("README.md", [
-    (r"(?m)^- 当前版本：\*\*v[\d.]+ 已发布\*\*.*$", f"- 当前版本：**v{ver} 已发布**"),
+    (r"(?m)^- 当前版本：\*\*v([\d.]+)([^*]*)\*\*.*$", r"- 当前版本：**v" + ver + r"\2**"),
     (r"worldforge-0\.\d+\.\d+\.jar", f"worldforge-{ver}.jar"),
 ])
 patch("docs/BETA-GUIDE.md", [

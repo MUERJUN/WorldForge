@@ -7,7 +7,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 - 游戏版本：Minecraft Java **1.21.1**
 - 加载器：Fabric Loader **0.16.9** + Fabric API **0.116.5+1.21.1**
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**
-- 当前版本：**v0.5.7 已发布**
+- 当前版本：**v0.6.0 Public Beta**
 
 ---
 
@@ -16,7 +16,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 **普通玩家安装（无需开发环境）：**
 
 1. 安装 [Fabric Loader 0.16.9](https://fabricmc.net/use/installer/)，选择 Minecraft **1.21.1**。
-2. 下载 [Fabric API 0.116.5+1.21.1](https://modrinth.com/mod/fabric-api) 与 GitHub Release 的 `worldforge-0.5.7.jar`。
+2. 下载 [Fabric API 0.116.5+1.21.1](https://modrinth.com/mod/fabric-api) 与 GitHub Release 的 `worldforge-0.6.0.jar`。
 3. 把两个 JAR 放入 `.minecraft/mods/`，启动游戏。
 4. 进入单人世界，按 **K** 打开 WorldForge Studio。
 
