@@ -35,6 +35,16 @@ public class WorldForgeClient implements ClientModInitializer {
 	private static KeyBinding chatKey;
 	private static KeyBinding studioKey;
 
+	/** The K key binding that opens the AI chat (used by the GUI auto-test). */
+	public static KeyBinding chatKeyBinding() {
+		return chatKey;
+	}
+
+	/** The legacy Studio key binding. */
+	public static KeyBinding studioKeyBinding() {
+		return studioKey;
+	}
+
 	@Override
 	public void onInitializeClient() {
 		ClientPlayNetworking.registerGlobalReceiver(WorldForgePayloads.SyncDefinitions.ID,
@@ -109,6 +119,10 @@ public class WorldForgeClient implements ClientModInitializer {
 
 		// v0.5.2: export screen auto-test (only active with -Dworldforge.export.autotest=true)
 		dev.worldforge.client.dev.ExportScreenAutoTest.init();
+
+		// v0.7.0: chat screen auto-test (only active with run/wf-chat-autotest.flag
+		// or -Dworldforge.chat.autotest=true)
+		dev.worldforge.client.dev.ChatAutoTest.register();
 
 		WorldForge.LOGGER.info("[WorldForge] client init done (K = AI chat, L = legacy studio)");
 	}

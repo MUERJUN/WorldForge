@@ -84,44 +84,43 @@ public class WorldForgeChatScreen extends Screen {
 	protected void init() {
 		ChatClientState.load();
 
-		panelW = Math.max(200, Math.min(440, width - 16));
-		panelH = Math.max(140, Math.min(230, height - 16));
-		panelX = (width - panelW) / 2;
-		panelY = (height - panelH) / 2;
-
-		listX = panelX + PAD;
-		listY = panelY + HEADER_H + 4;
-		listW = panelW - PAD * 2;
-		listH = panelH - HEADER_H - FOOTER_H - 8;
+		var l = dev.worldforge.ui.ChatLayout.compute(width, height);
+		panelW = l.panelW();
+		panelH = l.panelH();
+		panelX = l.panelX();
+		panelY = l.panelY();
+		listX = l.listX();
+		listY = l.listY();
+		listW = l.listW();
+		listH = l.listH();
 
 		// ---- header ----
 		int btnH = 16;
-		int by = panelY + 3;
 		sessionsButton = ButtonWidget.builder(Text.literal("☰ 会话"), b -> toggleSessions())
-				.position(panelX + PAD, by).size(46, btnH).build();
+				.position(l.sessionX(), l.headerY()).size(46, btnH).build();
 		newButton = ButtonWidget.builder(Text.literal("＋"), b -> {
 			ChatClientState.createSession();
 			stickToBottom = true;
 			scrollPixels = 0;
 			refreshButtons();
-		}).position(panelX + PAD + 50, by).size(20, btnH).build();
+		}).position(l.newX(), l.headerY()).size(20, btnH).build();
 		settingsButton = ButtonWidget.builder(Text.literal("⚙"), b -> {
 			if (settingsOpener != null) {
 				settingsOpener.openSettings();
 			}
-		}).position(panelX + panelW - PAD - 20, by).size(20, btnH).build();
+		}).position(l.settingsX(), l.headerY()).size(20, btnH).build();
 
 		// ---- footer ----
-		int fy = panelY + panelH - FOOTER_H + 2;
-		int sendW = 44;
-		input = new TextFieldWidget(textRenderer, panelX + PAD, fy,
-				Math.max(40, panelW - PAD * 2 - sendW - 4), 18, Text.literal("chat input"));
+		int fy = l.inputY();
+		int sendW = l.sendW();
+		input = new TextFieldWidget(textRenderer, l.inputX(), fy, l.inputW(), 18,
+				Text.literal("chat input"));
 		input.setMaxLength(4000);
 		input.setPlaceholder(Text.literal("描述你想要的物品或方块，例如：创建雷霆之剑，右键召唤闪电，冷却 5 秒"));
 		input.setChangedListener(s -> refreshButtons());
 
 		sendButton = ButtonWidget.builder(Text.literal("发送"), b -> submit())
-				.position(panelX + panelW - PAD - sendW, fy).size(sendW, 18).build();
+				.position(l.sendX(), l.sendY()).size(sendW, 18).build();
 		cancelButton = ButtonWidget.builder(Text.literal("取消任务"), b -> {
 			ChatClientState.cancelTask();
 		}).position(panelX + PAD, fy - 20).size(56, 18).build();
@@ -477,6 +476,55 @@ public class WorldForgeChatScreen extends Screen {
 	@Override
 	public void close() {
 		super.close();
+	}
+
+	/**
+	 * The panel bounds as {x, y, width, height}.
+	 *
+	 * <p>Used by the client auto-test to prove that every widget stays inside
+	 * the panel at every GUI scale — a layout claim that is checked, not
+	 * eyeballed.</p>
+	 */
+	public int[] panelBounds() {
+		return new int[]{panelX, panelY, panelW, panelH};
+	}
+
+	// ------------------------------------------------------------ test hooks
+
+	/** True when the input field has the keyboard focus. */
+	public boolean isInputFocused() {
+		return input != null && input.isFocused();
+	}
+
+	/** Fills the input field (used by the client auto-test). */
+	public void setInputText(String text) {
+		if (input != null) {
+			input.setText(text);
+			refreshButtons();
+		}
+	}
+
+	/** Sends the current input (used by the client auto-test). */
+	public void submitForTest() {
+		submit();
+	}
+
+	/** Forces the "running" state so the cancel control can be checked. */
+	public void setRunningForTest(boolean running) {
+		ChatClientState.active().setBusy(running);
+		refreshButtons();
+	}
+
+	/** True when a settings entry is offered. */
+	public boolean hasSettingsEntry() {
+		return settingsButton != null;
+	}
+
+	/** Opens the settings screen (used by the client auto-test). */
+	public void openSettingsForTest() {
+		if (settingsOpener != null) {
+			settingsOpener.openSettings();
+		}
 	}
 
 	/** Opens the legacy Studio (used by the settings entry). */
