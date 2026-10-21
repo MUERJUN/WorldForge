@@ -9,6 +9,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -26,7 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * object and the outgoing header - it is never logged (toString masks it),
  * never sent to clients, never written into world data.</p>
  */
-public final class OpenAICompatibleProvider implements ModelProvider {
+public final class OpenAICompatibleProvider implements ModelProvider, ToolCallingProvider {
 
 	private final AgentConfig cfg;
 	private final HttpClient http;
@@ -51,11 +52,55 @@ public final class OpenAICompatibleProvider implements ModelProvider {
 		CompletableFuture<String> out = new CompletableFuture<>();
 		pool.submit(() -> {
 			String body = requestBody(systemPrompt, userMessage);
+			try {
+				out.complete(extractContent(sendWithRetry(body, out)));
+			} catch (Exception e) {
+				out.completeExceptionally(e);
+			}
+		});
+		return out;
+	}
+
+	/**
+	 * v0.7.0: the tool-calling turn. Native {@code tools[]} is offered to the
+	 * service, and the same tool contract is ALSO written into the system
+	 * prompt, so a service without native tool calling can still answer with
+	 * the strict structured envelope. Both routes end up in the same
+	 * {@link ChatTurn.Turn}, hence the same permission boundary.
+	 */
+	@Override
+	public CompletableFuture<ChatTurn.Turn> completeWithTools(String systemPrompt,
+			List<ChatTurn> messages, List<dev.worldforge.ops.ToolDescriptor> tools) {
+		CompletableFuture<ChatTurn.Turn> out = new CompletableFuture<>();
+		pool.submit(() -> {
+			try {
+				String body = toolRequestBody(systemPrompt, messages, tools);
+				out.complete(ToolCallingSupport.parseResponse(sendWithRetry(body, out)));
+			} catch (Exception e) {
+				out.completeExceptionally(e);
+			}
+		});
+		return out;
+	}
+
+	/** Builds the tool-calling request body with this config's model settings. */
+	private String toolRequestBody(String systemPrompt, List<ChatTurn> messages,
+			List<dev.worldforge.ops.ToolDescriptor> tools) {
+		String body = ToolCallingSupport.requestBody(systemPrompt, messages, tools, true);
+		return body.replace("MODEL_PLACEHOLDER", cfg.model())
+				.replace("\"max_tokens\":1200", "\"max_tokens\":" + cfg.maxTokens());
+	}
+
+	/**
+	 * Shared HTTP path: bounded retries with backoff, hard timeout and a
+	 * response size cap. Never logs the body (it may echo the config).
+	 */
+	private String sendWithRetry(String body, CompletableFuture<?> out) throws Exception {
+		{
 			Exception last = null;
 			for (int attempt = 0; attempt <= Math.max(0, cfg.retries()); attempt++) {
 				if (cancelled.get() || out.isCancelled()) {
-					out.completeExceptionally(new java.util.concurrent.CancellationException("cancelled"));
-					return;
+					throw new java.util.concurrent.CancellationException("cancelled");
 				}
 				try {
 					HttpRequest req = HttpRequest.newBuilder(URI.create(endpoint()))
@@ -69,11 +114,9 @@ public final class OpenAICompatibleProvider implements ModelProvider {
 					if (code >= 200 && code < 300) {
 						String raw = res.body();
 						if (raw != null && raw.length() > 256 * 1024) {
-							out.completeExceptionally(new IllegalStateException("响应过大"));
-							return;
+							throw new IllegalStateException("响应过大");
 						}
-						out.complete(extractContent(raw));
-						return;
+						return raw;
 					}
 					// error body may echo config; log only the status, never the payload
 					last = new IllegalStateException("HTTP " + code);
@@ -84,8 +127,7 @@ public final class OpenAICompatibleProvider implements ModelProvider {
 					last = e;
 				} catch (InterruptedException e) {
 					Thread.currentThread().interrupt();
-					out.completeExceptionally(e);
-					return;
+					throw e;
 				} catch (Exception e) {
 					last = new Exception(e.getClass().getSimpleName());
 				}
@@ -96,9 +138,8 @@ public final class OpenAICompatibleProvider implements ModelProvider {
 					break;
 				}
 			}
-			out.completeExceptionally(last == null ? new IllegalStateException("未知网络错误") : last);
-		});
-		return out;
+			throw last == null ? new IllegalStateException("未知网络错误") : last;
+		}
 	}
 
 	String endpoint() {
