@@ -1,4 +1,4 @@
-# v0.7.0 验收指南（复现命令）
+# v0.7.x 验收指南（复现命令）
 
 本文件列出 v0.7.0 的**全部验收门禁**与**逐条复现命令**。
 
@@ -164,4 +164,19 @@ bash scripts/build-three-projects.sh
 ```
 
 期望：`BUILD SUCCESSFUL`，
-`All 64 required tests passed :)`（GameTest，含 A/B/C 三条真实流程）。
+`All 70 required tests passed :)`（GameTest，含 A/B/C 三条真实流程 + v0.7.1 的
+6 个并发/确认/删除/取消用例）。
+
+## 10. v0.7.1 新增的可靠性验收
+
+| 门禁 | 命令 | 覆盖 |
+|------|------|------|
+| 确认状态机（单元） | `./gradlew test --tests "dev.worldforge.ChatRuntimeConcurrencyTest"` | 终态互斥、**真实线程竞争**（批准 vs 拒绝、取消 vs 完成）、确认 ID 精确匹配、超时与预算 |
+| 客户端状态规则（单元） | `./gradlew test --tests "dev.worldforge.ChatClientStateTest"` | 消息去重、旧任务事件丢弃、已删除会话不复活、只有终态结束忙碌、12 个工具的权限与"无任意执行" |
+| 并发/确认/删除/取消（GameTest） | `./gradlew runGameTest` | 同会话 20 条连发、确认期间发第二条、两会话并行、旧任务迟到回答、删除一个会话不影响其他、**真实取消 Gradle 子进程** |
+| 真实客户端聊天验收 | `./gradlew runClientChatTest` | K 打开聊天、首页无专业按钮、多会话、运行状态指示器跟随真实状态、ESC |
+
+> **v0.7.1 的两条硬规则**（写进了测试）：
+> 1. 一个 `conversationId` 同时只有一个活动任务；第二条消息**明确排队或明确拒绝**。
+> 2. 只有**终态**（SUCCEEDED / FAILED / CANCELLED）才结束忙碌状态；
+>    "已确认，正在执行"和"已请求取消"都不是终态。
