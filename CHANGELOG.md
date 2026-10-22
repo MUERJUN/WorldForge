@@ -175,9 +175,9 @@
 | 聊天持久化单元测试 | 17/17 |
 | WF-Ops 工具层单元测试 | 27/27 |
 | 真实客户端聊天验收 | 26 项全通过，18 张截图 |
-| 独立 Mod GameTest | 8/8 |
-| Windows 隔离客户端 | 51/51 |
-| Linux CI | 见发布页 |
+| 独立 Mod GameTest（三工程真实构建） | **24/24**（alpha 8/8、beta 11/11、gamma 5/5，Windows 本机真实 Gradle 构建） |
+| 真实客户端聊天验收 | 全部通过，18 张截图 |
+| Linux CI | ✅ 8/8 步骤全绿（含聊天驱动的真实导出构建） |
 
 > 复现命令见 [`docs/ACCEPTANCE-v0.7.0.md`](docs/ACCEPTANCE-v0.7.0.md)。
 
