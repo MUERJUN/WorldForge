@@ -21,6 +21,11 @@ import java.util.Map;
  * @param requiresConfirmation true when the player must approve a summary first
  * @param longRunning     true when the call takes minutes (a Gradle build) and
  *                        therefore must NOT run on the server thread
+ * @param timeoutSeconds  how long this tool may take. It is never shorter
+ *                        than the work the tool actually waits for: a tool
+ *                        that runs a 20-minute build must not declare a
+ *                        shorter budget, or a healthy slow build would be
+ *                        reported as a failure.
  */
 public record ToolDescriptor(
 		String name,
@@ -29,7 +34,11 @@ public record ToolDescriptor(
 		ToolPermission permission,
 		boolean mutatesWorld,
 		boolean requiresConfirmation,
-		boolean longRunning) {
+		boolean longRunning,
+		int timeoutSeconds) {
+
+	/** The default budget of a tool that does not declare its own. */
+	public static final int DEFAULT_TIMEOUT_SECONDS = 120;
 
 	public ToolDescriptor {
 		if (name == null || name.isBlank()) {
@@ -41,27 +50,32 @@ public record ToolDescriptor(
 	}
 
 	public static ToolDescriptor read(String name, String description, JsonObject parameters) {
-		return new ToolDescriptor(name, description, parameters, ToolPermission.READ, false, false, false);
+		return new ToolDescriptor(name, description, parameters, ToolPermission.READ, false, false, false,
+				DEFAULT_TIMEOUT_SECONDS);
 	}
 
 	public static ToolDescriptor write(String name, String description, JsonObject parameters) {
-		return new ToolDescriptor(name, description, parameters, ToolPermission.WRITE, true, true, false);
+		return new ToolDescriptor(name, description, parameters, ToolPermission.WRITE, true, true, false,
+				DEFAULT_TIMEOUT_SECONDS);
 	}
 
 	public static ToolDescriptor admin(String name, String description, JsonObject parameters) {
-		return new ToolDescriptor(name, description, parameters, ToolPermission.ADMIN, true, true, false);
+		return new ToolDescriptor(name, description, parameters, ToolPermission.ADMIN, true, true, false,
+				DEFAULT_TIMEOUT_SECONDS);
 	}
 
 	/** A write tool with an explicit permission level. */
 	public static ToolDescriptor of(String name, String description, JsonObject parameters,
 			ToolPermission permission, boolean mutatesWorld, boolean requiresConfirmation) {
 		return new ToolDescriptor(name, description, parameters, permission, mutatesWorld,
-				requiresConfirmation, false);
+				requiresConfirmation, false, DEFAULT_TIMEOUT_SECONDS);
 	}
 
 	/** A tool whose execution takes minutes and must not block the server thread. */
-	public static ToolDescriptor longRunningAdmin(String name, String description, JsonObject parameters) {
-		return new ToolDescriptor(name, description, parameters, ToolPermission.ADMIN, true, true, true);
+	public static ToolDescriptor longRunningAdmin(String name, String description, JsonObject parameters,
+			int timeoutSeconds) {
+		return new ToolDescriptor(name, description, parameters, ToolPermission.ADMIN, true, true, true,
+				timeoutSeconds);
 	}
 
 	/**

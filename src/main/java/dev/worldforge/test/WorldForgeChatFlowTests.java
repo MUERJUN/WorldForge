@@ -55,45 +55,14 @@ public class WorldForgeChatFlowTests {
 	/** how long flow A and B may take (ticks; 100 = 5 seconds) */
 	private static final long FLOW_WAIT_TICKS = 100;
 
-	/** records every event the agent produced */
-	private static final class Recorder implements AgentOrchestrator.AgentEventSink {
-		final List<ToolEvent> events = new CopyOnWriteArrayList<>();
-
-		@Override
-		public void onMessage(String conversationId, String role, String text) {
-		}
-
-		@Override
-		public void onToolEvent(ToolEvent event) {
-			events.add(event);
-		}
-
-		@Override
-		public void onStatus(String conversationId, String status, String detail) {
-		}
-
-		/** the confirmation that is currently waiting, or null */
-		ToolEvent pending() {
-			for (ToolEvent e : events) {
-				if (e.status() == ToolEventStatus.AWAITING_CONFIRMATION) {
-					return e;
-				}
+	/** the confirmation that is currently waiting, or null */
+	private static ToolEvent pendingOf(AgentEventRecorder recorder) {
+		for (ToolEvent e : recorder.events()) {
+			if (e.status() == ToolEventStatus.AWAITING_CONFIRMATION) {
+				return e;
 			}
-			return null;
 		}
-
-		/** a compact dump for failure diagnostics */
-		String dump() {
-			StringBuilder sb = new StringBuilder();
-			for (ToolEvent e : events) {
-				sb.append(" | ").append(e.status()).append(" ").append(e.toolName())
-						.append(" -> ").append(e.summary());
-				if (!e.errorCode().isBlank()) {
-					sb.append(" (").append(e.errorCode()).append(')');
-				}
-			}
-			return sb.toString();
-		}
+		return null;
 	}
 
 	private static ServerPlayerEntity opPlayer(TestContext ctx) {
@@ -141,13 +110,13 @@ public class WorldForgeChatFlowTests {
 				new ChatTurn.Turn.Final("已经给你的剑加上了右键加速效果。")));
 		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
 
-		var recorder = new Recorder();
+		var recorder = new AgentEventRecorder();
 		String conversationId = "flow-a";
 		AgentOrchestrator.send(server, player, conversationId, "让它右键召唤加速", null, recorder);
 
 		// one wait: long enough for the whole scripted turn
 		ctx.waitAndRun(FLOW_WAIT_TICKS, () -> {
-			var pending = recorder.pending();
+			var pending = pendingOf(recorder);
 			ctx.assertTrue(pending != null, "the agent must ask for a confirmation " + recorder.dump());
 			if (pending == null) {
 				return;
@@ -243,13 +212,13 @@ public class WorldForgeChatFlowTests {
 				new ChatTurn.Turn.Final("方块右键现在会给你加速了。")));
 		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
 
-		var recorder = new Recorder();
+		var recorder = new AgentEventRecorder();
 		String conversationId = "flow-b";
 		aim.accept(player);
 		AgentOrchestrator.send(server, player, conversationId, "让这个方块右键时给我加速", null, recorder);
 
 		ctx.waitAndRun(FLOW_WAIT_TICKS, () -> {
-			var pending = recorder.pending();
+			var pending = pendingOf(recorder);
 			ctx.assertTrue(pending != null, "the agent must ask for a confirmation " + recorder.dump());
 			if (pending == null) {
 				return;

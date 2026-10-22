@@ -24,6 +24,9 @@ import java.util.List;
  * @param affectedTargets ids the event refers to, or empty
  * @param confirmationId  the id the player must echo back to approve or
  *                        refuse; only set for AWAITING_CONFIRMATION
+ * @param taskId          the id of the task that produced the event; the
+ *                        client uses it to drop events of a task that is no
+ *                        longer the current one
  */
 public record ToolEvent(
 		String conversationId,
@@ -36,14 +39,23 @@ public record ToolEvent(
 		String summary,
 		String errorCode,
 		List<String> affectedTargets,
-		String confirmationId) {
+		String confirmationId,
+		String taskId) {
+
+	/** Compact form for an event that carries a confirmation id. */
+	public ToolEvent(String conversationId, String requestId, String toolCallId, long sequence,
+			long timestampMillis, String toolName, ToolEventStatus status, String summary,
+			String errorCode, List<String> affectedTargets, String confirmationId) {
+		this(conversationId, requestId, toolCallId, sequence, timestampMillis, toolName, status,
+				summary, errorCode, affectedTargets, confirmationId, "");
+	}
 
 	/** Compact form for events that carry no confirmation id. */
 	public ToolEvent(String conversationId, String requestId, String toolCallId, long sequence,
 			long timestampMillis, String toolName, ToolEventStatus status, String summary,
 			String errorCode, List<String> affectedTargets) {
 		this(conversationId, requestId, toolCallId, sequence, timestampMillis, toolName, status,
-				summary, errorCode, affectedTargets, "");
+				summary, errorCode, affectedTargets, "", "");
 	}
 
 	public ToolEvent {
@@ -56,6 +68,7 @@ public record ToolEvent(
 		errorCode = errorCode == null ? "" : errorCode;
 		affectedTargets = affectedTargets == null ? List.of() : List.copyOf(affectedTargets);
 		confirmationId = confirmationId == null ? "" : confirmationId;
+		taskId = taskId == null ? "" : taskId;
 	}
 
 	/** Serialised form shipped to the client. */
@@ -74,6 +87,7 @@ public record ToolEvent(
 		affectedTargets.forEach(arr::add);
 		o.add("targets", arr);
 		o.addProperty("confirmationId", confirmationId);
+		o.addProperty("taskId", taskId);
 		return o;
 	}
 }

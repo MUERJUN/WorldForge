@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import dev.worldforge.chat.ChatMessage;
 import dev.worldforge.chat.ChatSession;
+import dev.worldforge.chat.ChatTaskState;
 import dev.worldforge.chat.ChatStore;
 import dev.worldforge.network.WorldForgeChatProtocol;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -33,6 +34,12 @@ public final class ChatClientState {
 	private static volatile String lastServerNotice = "";
 	/** monotonically increasing request id for outgoing requests */
 	private static int nextRequestId = 1;
+	/** the client-side ids of the requests that were already shown */
+	private static final java.util.Set<String> SEEN_REQUEST_IDS =
+			java.util.Collections.synchronizedSet(new java.util.LinkedHashSet<>());
+	/** conversations the player deleted: their late events are dropped */
+	private static final java.util.Set<String> DELETED_CONVERSATIONS =
+			java.util.Collections.synchronizedSet(new java.util.LinkedHashSet<>());
 
 	private ChatClientState() {
 	}
@@ -69,6 +76,7 @@ public final class ChatClientState {
 	public static synchronized void switchTo(String conversationId) {
 		load();
 		activeId = conversationId == null || conversationId.isBlank() ? "default" : conversationId;
+		DELETED_CONVERSATIONS.remove(activeId);
 		SESSIONS.computeIfAbsent(activeId, ChatSession::new);
 	}
 
@@ -88,6 +96,8 @@ public final class ChatClientState {
 		load();
 		SESSIONS.remove(conversationId);
 		ChatStore.delete(conversationId);
+		// a late event of this conversation must not bring it back
+		DELETED_CONVERSATIONS.add(conversationId);
 		if (conversationId.equals(activeId)) {
 			activeId = SESSIONS.isEmpty() ? "default" : SESSIONS.keySet().iterator().next();
 			SESSIONS.computeIfAbsent(activeId, ChatSession::new);
@@ -113,11 +123,15 @@ public final class ChatClientState {
 			return;
 		}
 		session.add(ChatMessage.player(trimmed));
-		session.setBusy(true);
+		session.setTaskState(ChatTaskState.THINKING);
 		persist(session);
 		JsonObject body = new JsonObject();
 		body.addProperty("conversationId", session.conversationId());
 		body.addProperty("message", trimmed);
+		// the client-side id lets the server echo be recognised as a duplicate
+		String clientRequestId = "c" + (nextRequestId++);
+		SEEN_REQUEST_IDS.add(clientRequestId);
+		body.addProperty("clientRequestId", clientRequestId);
 		// send a little context so a restored conversation keeps its thread
 		String context = session.recentContext(6);
 		if (!context.isEmpty()) {
@@ -178,26 +192,53 @@ public final class ChatClientState {
 			switch (type == null ? "" : type) {
 				case "message" -> {
 					String cid = str(o, "conversationId");
+					ChatSession s = sessionFor(cid);
+					if (s == null) {
+						return; // a deleted conversation must not be recreated
+					}
 					String role = str(o, "role");
 					String text = str(o, "text");
-					ChatSession s = SESSIONS.computeIfAbsent(cid, ChatSession::new);
+					String taskId = str(o, "taskId");
+					String clientRequestId = str(o, "clientRequestId");
 					if ("user".equals(role)) {
-						s.add(ChatMessage.player(text));
+						// the client already shows the message it sent, so the
+						// server echo only CONFIRMS it
+						if (!clientRequestId.isBlank() && SEEN_REQUEST_IDS.contains(clientRequestId)) {
+							return;
+						}
+						if (!clientRequestId.isBlank()) {
+							SEEN_REQUEST_IDS.add(clientRequestId);
+						}
+						if (s.messages().stream().noneMatch(m -> m.role() == ChatMessage.Role.PLAYER
+								&& m.text().equals(text))) {
+							s.add(ChatMessage.player(text));
+						}
 					} else {
 						s.add(ChatMessage.assistant(text));
+					}
+					if (!taskId.isBlank()) {
+						s.setTaskId(taskId);
 					}
 					persist(s);
 				}
 				case "tool" -> {
 					String cid = str(o, "conversationId");
-					ChatSession s = SESSIONS.computeIfAbsent(cid, ChatSession::new);
+					ChatSession s = sessionFor(cid);
+					if (s == null) {
+						return;
+					}
 					String tool = str(o, "tool");
 					String status = str(o, "status");
 					String summary = str(o, "summary");
 					String errorCode = str(o, "error");
 					String confirmationId = str(o, "confirmationId");
+					String taskId = str(o, "taskId");
+					if (!isCurrentTask(s, taskId)) {
+						return; // an event of a task that is no longer current
+					}
 					if ("AWAITING_CONFIRMATION".equals(status)) {
 						s.setPending(confirmationId, tool, summary);
+						s.setTaskState(ChatTaskState.AWAITING_CONFIRMATION);
 						s.add(ChatMessage.confirmation(confirmationId, tool, summary));
 					} else {
 						s.add(ChatMessage.tool(tool, status, summary, errorCode));
@@ -210,25 +251,38 @@ public final class ChatClientState {
 				}
 				case "status" -> {
 					String cid = str(o, "conversationId");
+					ChatSession s = sessionFor(cid == null || cid.isBlank() ? activeId : cid);
+					if (s == null) {
+						return;
+					}
 					String status = str(o, "status");
 					String detail = str(o, "detail");
-					ChatSession s = SESSIONS.computeIfAbsent(cid == null || cid.isBlank()
-							? activeId : cid, ChatSession::new);
-					if ("thinking".equals(status)) {
-						s.setBusy(true);
-					} else if ("done".equals(status) || "error".equals(status)
-							|| "cancelled".equals(status)) {
-						s.setBusy(false);
-						if ("error".equals(status) && detail != null && !detail.isBlank()) {
+					String taskId = str(o, "taskId");
+					if (!isCurrentTask(s, taskId)) {
+						return; // a stale event must not overwrite the new state
+					}
+					ChatTaskState state = ChatTaskState.fromServer(status);
+					if (state == null) {
+						// an unknown state never clears a busy state
+						if (detail != null && !detail.isBlank() && !s.busy()) {
 							s.add(ChatMessage.system(detail));
-							lastServerNotice = detail;
 						}
-					} else if ("info".equals(status)) {
-						s.setBusy(false);
+						return;
+					}
+					s.setTaskState(state);
+					if (state == ChatTaskState.AWAITING_CONFIRMATION) {
+						s.add(ChatMessage.system(detail == null || detail.isBlank()
+								? "等待你确认上面的操作" : detail));
+					} else if (state.isTerminal()) {
 						s.clearPending();
 						if (detail != null && !detail.isBlank()) {
 							s.add(ChatMessage.system(detail));
 						}
+						if (state == ChatTaskState.FAILED && detail != null && !detail.isBlank()) {
+							lastServerNotice = detail;
+						}
+					} else if (state == ChatTaskState.QUEUED && detail != null && !detail.isBlank()) {
+						s.add(ChatMessage.system(detail));
 					}
 					persist(s);
 				}
@@ -250,6 +304,36 @@ public final class ChatClientState {
 		}
 	}
 
+	/**
+	 * The session an event belongs to, or {@code null} when the conversation
+	 * was deleted and the event is a leftover.
+	 *
+	 * <p>v0.7.1: an old event must never bring a deleted conversation back.</p>
+	 */
+	private static ChatSession sessionFor(String conversationId) {
+		if (conversationId == null || conversationId.isBlank()) {
+			return null;
+		}
+		if (DELETED_CONVERSATIONS.contains(conversationId)) {
+			return null;
+		}
+		return SESSIONS.computeIfAbsent(conversationId, ChatSession::new);
+	}
+
+	/**
+	 * True when the event belongs to the task the client currently follows.
+	 *
+	 * <p>An event of an OLD task must not overwrite the state of the task
+	 * that replaced it.</p>
+	 */
+	private static boolean isCurrentTask(ChatSession session, String taskId) {
+		if (taskId == null || taskId.isBlank()) {
+			return true; // an event without a task id cannot be judged
+		}
+		String current = session.taskId();
+		return current.isBlank() || current.equals(taskId);
+	}
+
 	/** Persists a conversation (best effort). */
 	private static void persist(ChatSession session) {
 		ChatStore.save(session);
@@ -267,5 +351,7 @@ public final class ChatClientState {
 		SESSIONS.clear();
 		activeId = "default";
 		lastServerNotice = "";
+		SEEN_REQUEST_IDS.clear();
+		DELETED_CONVERSATIONS.clear();
 	}
 }

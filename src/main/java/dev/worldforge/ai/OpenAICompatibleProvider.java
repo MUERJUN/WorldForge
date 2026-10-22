@@ -14,6 +14,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * OpenAI-compatible Chat Completions backend (spec 三/六): plain HTTPS via
@@ -49,16 +50,42 @@ public final class OpenAICompatibleProvider implements ModelProvider, ToolCallin
 
 	@Override
 	public CompletableFuture<String> complete(String systemPrompt, String userMessage) {
-		CompletableFuture<String> out = new CompletableFuture<>();
+		AtomicReference<Thread> worker = new AtomicReference<>();
+		CompletableFuture<String> out = cancellable(worker);
 		pool.submit(() -> {
+			worker.set(Thread.currentThread());
 			String body = requestBody(systemPrompt, userMessage);
 			try {
 				out.complete(extractContent(sendWithRetry(body, out)));
 			} catch (Exception e) {
 				out.completeExceptionally(e);
+			} finally {
+				worker.set(null);
 			}
 		});
 		return out;
+	}
+
+	/**
+	 * A future whose cancellation really stops the request.
+	 *
+	 * <p>v0.7.1: {@link CompletableFuture#cancel(boolean)} does NOT interrupt
+	 * the thread that is running the request, so a cancelled agent task left
+	 * its HTTP call (and the provider thread) running until the response
+	 * arrived. This future interrupts the worker, and the JDK HTTP client
+	 * aborts the request when its thread is interrupted.</p>
+	 */
+	private static <T> CompletableFuture<T> cancellable(AtomicReference<Thread> worker) {
+		return new CompletableFuture<T>() {
+			@Override
+			public boolean cancel(boolean mayInterruptIfRunning) {
+				Thread w = worker.get();
+				if (w != null && mayInterruptIfRunning) {
+					w.interrupt();
+				}
+				return super.cancel(mayInterruptIfRunning);
+			}
+		};
 	}
 
 	/**
@@ -71,13 +98,17 @@ public final class OpenAICompatibleProvider implements ModelProvider, ToolCallin
 	@Override
 	public CompletableFuture<ChatTurn.Turn> completeWithTools(String systemPrompt,
 			List<ChatTurn> messages, List<dev.worldforge.ops.ToolDescriptor> tools) {
-		CompletableFuture<ChatTurn.Turn> out = new CompletableFuture<>();
+		AtomicReference<Thread> worker = new AtomicReference<>();
+		CompletableFuture<ChatTurn.Turn> out = cancellable(worker);
 		pool.submit(() -> {
+			worker.set(Thread.currentThread());
 			try {
 				String body = toolRequestBody(systemPrompt, messages, tools);
 				out.complete(ToolCallingSupport.parseResponse(sendWithRetry(body, out)));
 			} catch (Exception e) {
 				out.completeExceptionally(e);
+			} finally {
+				worker.set(null);
 			}
 		});
 		return out;

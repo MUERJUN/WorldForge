@@ -26,6 +26,8 @@ import java.util.UUID;
  *                         A tool that has extra conditions (for example the
  *                         exporter's degradation consent) checks THIS, not
  *                         the model's own description.
+ * @param task            the handle of the running task; a tool that starts
+ *                         something expensive registers its cancellation here
  */
 public record ToolContext(
 		ServerPlayerEntity player,
@@ -34,7 +36,8 @@ public record ToolContext(
 		RegistryKey<net.minecraft.world.World> dimension,
 		String conversationId,
 		ToolScope scope,
-		String confirmedSummary) {
+		String confirmedSummary,
+		ToolTaskHandle task) {
 
 	public ToolContext {
 		confirmedSummary = confirmedSummary == null ? "" : confirmedSummary;
@@ -42,8 +45,15 @@ public record ToolContext(
 
 	/** A context for a call that needs no approval. */
 	public ToolContext(ServerPlayerEntity player, MinecraftServer server, ServerWorld world,
+			RegistryKey<net.minecraft.world.World> dimension, String conversationId, ToolScope scope,
+			ToolTaskHandle task) {
+		this(player, server, world, dimension, conversationId, scope, "", task);
+	}
+
+	/** A context for a call that is not bound to a task. */
+	public ToolContext(ServerPlayerEntity player, MinecraftServer server, ServerWorld world,
 			RegistryKey<net.minecraft.world.World> dimension, String conversationId, ToolScope scope) {
-		this(player, server, world, dimension, conversationId, scope, "");
+		this(player, server, world, dimension, conversationId, scope, "", null);
 	}
 
 	/**
@@ -78,13 +88,13 @@ public record ToolContext(
 	/** A copy of this context with a different authorization scope. */
 	public ToolContext withScope(ToolScope newScope) {
 		return new ToolContext(player, server, world, dimension, conversationId, newScope,
-				confirmedSummary);
+				confirmedSummary, task);
 	}
 
 	/** A copy of this context that carries the summary the player approved. */
 	public ToolContext withConfirmedSummary(String summary) {
 		return new ToolContext(player, server, world, dimension, conversationId, scope,
-				summary == null ? "" : summary);
+				summary == null ? "" : summary, task);
 	}
 
 	public UUID playerId() {

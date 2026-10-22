@@ -68,7 +68,10 @@ public final class ExportModTool {
 		return ToolDescriptor.longRunningAdmin(NAME,
 				"把选定的物品和方块构建成一个独立的 Fabric Mod JAR。会真的运行 Gradle 构建，"
 						+ "过程中会在聊天里显示真实进度；完成后给出 JAR 名称和工作区中的相对位置。",
-				schema);
+				schema,
+				// the budget FOLLOWS the build: it must never be shorter than
+				// the Gradle build the tool actually waits for
+				dev.worldforge.ai.AgentTimeouts.EXPORT_TOOL_SECONDS);
 	}
 
 	public static final ToolExecutor EXECUTOR = (ctx, request, sink) -> {
@@ -159,6 +162,12 @@ public final class ExportModTool {
 
 		// --- run the build on THIS (worker) thread, never the server thread ---
 		ExportExecutor executor = new ExportExecutor(exportPlan);
+		// v0.7.1: a cancellation really stops the build — the Gradle process
+		// AND its process tree are destroyed, and the produced JARs are
+		// cleaned up by the exporter itself.
+		if (ctx.task() != null) {
+			ctx.task().onCancel(executor::cancel);
+		}
 		Thread progress = startProgressReporter(executor, sink, request);
 		ModExporter.ExportResult result;
 		try {
@@ -174,6 +183,21 @@ public final class ExportModTool {
 		o.addProperty("mod_id", plan.modId());
 		o.addProperty("mod_name", plan.modName());
 		o.addProperty("version", plan.version());
+		boolean cancelled = ctx.task() != null && ctx.task().isCancelled();
+		if (cancelled) {
+			// the build was cancelled. If it had ALREADY finished before the
+			// cancellation arrived, that must be said honestly: an artifact
+			// that exists cannot be un-made.
+			if (result.ok()) {
+				o.addProperty("jar_name", result.jarPath() == null ? ""
+						: result.jarPath().getFileName().toString());
+				o.addProperty("already_completed", true);
+				return ToolResult.fail("export_already_completed",
+						"导出在取消到达之前已经完成，产物已保留：" + result.jarPath());
+			}
+			o.addProperty("error", result.errorMessage() == null ? "已取消" : result.errorMessage());
+			return ToolResult.fail("export_cancelled", "导出已取消，构建进程已终止，产物已清理。");
+		}
 		if (result.ok()) {
 			Path jar = result.jarPath();
 			o.addProperty("jar_name", jar == null ? "" : jar.getFileName().toString());

@@ -22,7 +22,8 @@ public final class ChatSession {
 	private String pendingConfirmationId = "";
 	private String pendingToolName = "";
 	private String pendingSummary = "";
-	private boolean busy;
+	private volatile ChatTaskState taskState = ChatTaskState.IDLE;
+	private volatile String taskId = "";
 	/** true when the last persisted copy of this conversation could not be read */
 	private boolean corrupted;
 
@@ -86,12 +87,43 @@ public final class ChatSession {
 		this.pendingSummary = "";
 	}
 
-	public boolean busy() {
-		return busy;
+	/**
+	 * The state of the task that is running in this conversation.
+	 *
+	 * <p>v0.7.1: an explicit state instead of a boolean, so "confirmed, still
+	 * executing" and "cancel requested, not stopped yet" are different from
+	 * "finished".</p>
+	 */
+	public ChatTaskState taskState() {
+		return taskState;
 	}
 
-	public void setBusy(boolean busy) {
-		this.busy = busy;
+	public void setTaskState(ChatTaskState state) {
+		this.taskState = state == null ? ChatTaskState.IDLE : state;
+	}
+
+	/** The id of the task the client currently follows. */
+	public String taskId() {
+		return taskId;
+	}
+
+	public void setTaskId(String taskId) {
+		this.taskId = taskId == null ? "" : taskId;
+	}
+
+	/**
+	 * True while a task is doing something.
+	 *
+	 * <p>Only a TERMINAL state ends it — a confirmation or a cancel request
+	 * does not.</p>
+	 */
+	public boolean busy() {
+		return taskState.isBusy();
+	}
+
+	/** True while the client waits for the player's decision. */
+	public boolean awaitingConfirmation() {
+		return taskState == ChatTaskState.AWAITING_CONFIRMATION;
 	}
 
 	public boolean corrupted() {

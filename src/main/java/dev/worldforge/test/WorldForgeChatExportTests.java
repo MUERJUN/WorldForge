@@ -69,56 +69,17 @@ public class WorldForgeChatExportTests {
 	/** how long the first wait lasts (the report + the confirmation) */
 	private static final long FIRST_WAIT_TICKS = 120;
 
-	private static final class Recorder implements AgentOrchestrator.AgentEventSink {
-		final List<ToolEvent> events = new CopyOnWriteArrayList<>();
 
-		@Override
-		public void onMessage(String conversationId, String role, String text) {
-		}
 
-		@Override
-		public void onToolEvent(ToolEvent event) {
-			events.add(event);
-		}
-
-		@Override
-		public void onStatus(String conversationId, String status, String detail) {
-		}
-
-		ToolEvent pending() {
-			for (ToolEvent e : events) {
-				if (e.status() == ToolEventStatus.AWAITING_CONFIRMATION) {
-					return e;
-				}
+	/** the confirmation that is currently waiting, or null */
+	private static ToolEvent pendingOf(AgentEventRecorder recorder) {
+		for (ToolEvent e : recorder.events()) {
+			if (e.status() == ToolEventStatus.AWAITING_CONFIRMATION) {
+				return e;
 			}
-			return null;
 		}
-
-		ToolEvent finished(String tool) {
-			for (ToolEvent e : events) {
-				if (tool.equals(e.toolName())
-						&& (e.status() == ToolEventStatus.SUCCEEDED
-								|| e.status() == ToolEventStatus.FAILED
-								|| e.status() == ToolEventStatus.CANCELLED)) {
-					return e;
-				}
-			}
-			return null;
-		}
-
-		String dump() {
-			StringBuilder sb = new StringBuilder();
-			for (ToolEvent e : events) {
-				sb.append(" | ").append(e.status()).append(" ").append(e.toolName())
-						.append(" -> ").append(e.summary());
-				if (!e.errorCode().isBlank()) {
-					sb.append(" (").append(e.errorCode()).append(')');
-				}
-			}
-			return sb.toString();
-		}
+		return null;
 	}
-
 
 	/**
 	 * Flow C: the chat really builds a standalone mod.
@@ -159,19 +120,19 @@ public class WorldForgeChatExportTests {
 		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider,
 				new AgentConfig(true, "http://mock", "mock", "sk-test", 300, 500, 0, 100, 12, 600));
 
-		var recorder = new Recorder();
+		var recorder = new AgentEventRecorder();
 		String conversationId = "flow-c";
 		AgentOrchestrator.send(server, player, conversationId, "把刚才的剑导出成一个独立 Mod", null, recorder);
 
 		// --- 1) the capability report, then the confirmation ---
 		ctx.waitAndRun(FIRST_WAIT_TICKS, () -> {
-			var report = recorder.finished("check_export_capabilities");
+			var report = recorder.finishedEventOf("check_export_capabilities");
 			ctx.assertTrue(report != null, "the agent must ask for the capability report "
 					+ recorder.dump());
 			ctx.assertTrue(report != null && report.status() == ToolEventStatus.SUCCEEDED,
 					"the capability report must succeed: " + report);
 
-			var pending = recorder.pending();
+			var pending = pendingOf(recorder);
 			ctx.assertTrue(pending != null, "the export must ask for a confirmation " + recorder.dump());
 			if (pending == null) {
 				return;
@@ -192,7 +153,7 @@ public class WorldForgeChatExportTests {
 			// method body can already be "in the past" when the test starts.
 			ctx.waitAndRun(BUILD_WAIT_TICKS, () -> {
 					// the export must have really started a Gradle build
-					boolean launched = recorder.events.stream()
+					boolean launched = recorder.events().stream()
 							.anyMatch(e -> "export_mod".equals(e.toolName())
 									&& e.status() == ToolEventStatus.RUNNING
 									&& e.summary().contains("subprocess started"));
