@@ -29,7 +29,21 @@ public record AgentConfig(
 		int retries,
 		int rateLimitPerMinute,
 		int historyLimit,
-		int proposalTtlSeconds) {
+		int proposalTtlSeconds,
+		boolean nativeToolCalling) {
+
+	/**
+	 * The short form, with the native tool calling OFF.
+	 *
+	 * <p>v0.7.2: the flag is off by default, so an existing installation
+	 * behaves exactly as before. A service that supports the native
+	 * {@code tools[]} field can switch it on in {@code agent.json}.</p>
+	 */
+	public AgentConfig(boolean enabled, String baseUrl, String model, String apiKey, int timeoutSeconds,
+			int maxTokens, int retries, int rateLimitPerMinute, int historyLimit, int proposalTtlSeconds) {
+		this(enabled, baseUrl, model, apiKey, timeoutSeconds, maxTokens, retries, rateLimitPerMinute,
+				historyLimit, proposalTtlSeconds, false);
+	}
 
 	/** selectable service providers; CUSTOM accepts any OpenAI-compatible URL */
 	public enum Provider {
@@ -148,7 +162,8 @@ public record AgentConfig(
 					optInt(o, "retries", 1),
 					optInt(o, "rateLimitPerMinute", 10),
 					optInt(o, "historyLimit", 12),
-					optInt(o, "proposalTtlSeconds", 300));
+					optInt(o, "proposalTtlSeconds", 300),
+					optBool(o, "nativeToolCalling", false));
 		} catch (Exception e) {
 			// never log the file content (it may contain the key)
 			return DISABLED;
@@ -173,7 +188,8 @@ public record AgentConfig(
 					  "retries": 1,
 					  "rateLimitPerMinute": 10,
 					  "historyLimit": 12,
-					  "proposalTtlSeconds": 300
+					  "proposalTtlSeconds": 300,
+					  "nativeToolCalling": false
 					}""";
 			Files.writeString(file, tpl, StandardCharsets.UTF_8);
 			try {

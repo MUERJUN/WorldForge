@@ -117,7 +117,13 @@ public final class OpenAICompatibleProvider implements ModelProvider, ToolCallin
 	/** Builds the tool-calling request body with this config's model settings. */
 	private String toolRequestBody(String systemPrompt, List<ChatTurn> messages,
 			List<dev.worldforge.ops.ToolDescriptor> tools) {
-		String body = ToolCallingSupport.requestBody(systemPrompt, messages, tools, true);
+		// v0.7.2: the native tools[] array is sent only when the configuration
+		// asks for it. A service that does not understand the field may reject
+		// the whole request, and a service that understands it but answers with
+		// plain text still works through the structured fallback — so the flag
+		// is OFF by default and an existing installation does not change.
+		boolean nativeTools = cfg.nativeToolCalling();
+		String body = ToolCallingSupport.requestBody(systemPrompt, messages, tools, nativeTools);
 		return body.replace("MODEL_PLACEHOLDER", cfg.model())
 				.replace("\"max_tokens\":1200", "\"max_tokens\":" + cfg.maxTokens());
 	}
