@@ -83,6 +83,22 @@ public record ToolContext(
 		public boolean allowsBlock(String id) {
 			return allowedBlockIds.contains(id);
 		}
+
+		/**
+		 * True when the tool may write this item.
+		 *
+		 * <p>v0.7.1: the scope was checked by comparing the confirmed ids
+		 * against THEMSELVES, so it could never fail. Each tool that writes
+		 * must ask here for the id it is about to write.</p>
+		 */
+		public boolean mayWriteItem(String id) {
+			return allowsItem(id);
+		}
+
+		/** True when the tool may write this block. */
+		public boolean mayWriteBlock(String id) {
+			return allowsBlock(id);
+		}
 	}
 
 	/** A copy of this context with a different authorization scope. */

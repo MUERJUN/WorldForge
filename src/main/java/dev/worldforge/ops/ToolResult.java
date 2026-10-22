@@ -63,6 +63,11 @@ public record ToolResult(
 		return new ToolResult(false, errorCode, displayText, "{}", List.of(), false, false, "none");
 	}
 
+	/** Failure that also carries data for the model. */
+	public static ToolResult fail(String errorCode, String displayText, String dataJson) {
+		return new ToolResult(false, errorCode, displayText, dataJson, List.of(), false, false, "none");
+	}
+
 	/**
 	 * The operation was CANCELLED — it did not fail, the player asked for it.
 	 *

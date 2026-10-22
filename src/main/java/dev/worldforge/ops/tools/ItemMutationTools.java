@@ -77,6 +77,10 @@ public final class ItemMutationTools {
 			return ToolResult.fail("invalid_arguments", outcome.error());
 		}
 		ItemDefinition def = outcome.value();
+		if (!ctx.scope().mayWriteItem(def.id())) {
+			return ToolResult.fail("out_of_scope",
+					"这个物品不在你确认的范围内：" + def.id());
+		}
 		var r = WorldForgeTools.createItem(ctx.server(), def);
 		JsonObject o = new JsonObject();
 		o.addProperty("id", def.id());
@@ -85,7 +89,7 @@ public final class ItemMutationTools {
 		o.addProperty("applied", r.applied());
 		o.addProperty("sync", r.sync().name());
 		if (!r.ok()) {
-			return ToolResult.degraded("persistence-failed",
+			return ToolResult.degraded(failureCode(r.message()),
 					"创建物品失败（未写入）: " + r.message(), r.persisted(), r.applied());
 		}
 		return new ToolResult(true, "", "已创建物品 " + def.name() + "（" + def.id() + "）",
@@ -93,13 +97,33 @@ public final class ItemMutationTools {
 	};
 
 	/** Prepare step: the id does not exist yet, so there is no snapshot. */
+	/**
+	 * The right error code for a failed write.
+	 *
+	 * <p>v0.7.1: everything used to be reported as "persistence-failed", so a
+	 * validation failure ("this id already exists") told the model the disk
+	 * had failed. That is simply not true.</p>
+	 */
+	static String failureCode(String message) {
+		String m = message == null ? "" : message.toLowerCase(java.util.Locale.ROOT);
+		if (m.contains("已存在") || m.contains("already exists") || m.contains("no such item")) {
+			return "already_exists";
+		}
+		if (m.contains("save") || m.contains("persist") || m.contains("disk") || m.contains("磁盘")) {
+			return "persistence-failed";
+		}
+		return "invalid_arguments";
+	}
+
 	public static final ToolPreparer CREATE_PREPARER = (ctx, request) -> {
 		String id = dev.worldforge.tool.WorldForgeTools.normalizeId(ToolDefinitions.str(request, "id"));
 		if (id == null) {
 			return ToolPreparation.none();
 		}
-		return new ToolPreparation(List.of(), List.of(),
-				"将创建新物品 " + id, "");
+		return ToolPreparation.of(List.of(id), List.of(),
+				"将创建新物品 " + id, "",
+				ctx.world() == null ? "" : ctx.worldId(),
+				ctx.dimensionId() == null ? "" : ctx.dimensionId().toString());
 	};
 
 	// ---------------------------------------------------------------- update
@@ -139,6 +163,9 @@ public final class ItemMutationTools {
 			return ToolResult.fail("invalid_arguments", outcome.error());
 		}
 		ItemDefinition merged = outcome.value();
+		if (!ctx.scope().mayWriteItem(id)) {
+			return ToolResult.fail("out_of_scope", "这个物品不在你确认的范围内：" + id);
+		}
 		var r = WorldForgeTools.updateItem(ctx.server(), merged);
 		JsonObject o = new JsonObject();
 		o.addProperty("id", id);
@@ -146,7 +173,7 @@ public final class ItemMutationTools {
 		o.addProperty("applied", r.applied());
 		o.addProperty("sync", r.sync().name());
 		if (!r.ok()) {
-			return ToolResult.degraded("persistence-failed",
+			return ToolResult.degraded(failureCode(r.message()),
 					"修改物品失败（未写入）: " + r.message(), r.persisted(), r.applied());
 		}
 		return new ToolResult(true, "", "已修改物品 " + id + "（背包中的存量物品立即生效）",
@@ -168,9 +195,11 @@ public final class ItemMutationTools {
 		if (current == null) {
 			return ToolPreparation.none();
 		}
-		return new ToolPreparation(List.of(id), List.of(),
+		return ToolPreparation.of(List.of(id), List.of(),
 				"将修改物品 " + id + " 的定义（当前名称: " + current.name() + "，已有行为 "
 						+ current.behaviors().size() + " 条）。背包中该物品的存量实例会立即生效。",
-				ToolDefinitions.snapshotOf(current));
+				ToolDefinitions.snapshotOf(current),
+				ctx.world() == null ? "" : ctx.worldId(),
+				ctx.dimensionId() == null ? "" : ctx.dimensionId().toString());
 	};
 }

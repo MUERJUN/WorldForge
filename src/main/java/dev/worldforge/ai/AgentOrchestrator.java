@@ -704,10 +704,28 @@ public final class AgentOrchestrator {
 			return ChatTurn.toolResult(request.toolCallId(), request.toolName(),
 					"{\"ok\":false,\"error_code\":\"target_changed\",\"message\":\"目标在你确认期间发生了变化，已拒绝执行\"}");
 		}
+		// ... and the player must still be in the world the target was seen in.
+		// The definition snapshot cannot catch this: a block in the OLD world
+		// shares its definition with every other instance of the same id.
+		ToolContext fresh = context(server, player, conversationId, descriptor, token);
+		if (fresh == null || !sameWorld(prep, fresh)) {
+			sink.onToolEvent(event(conversationId, requestId, token, request.toolCallId(), request.toolName(),
+					ToolEventStatus.FAILED, "你在确认期间换了世界或维度，已拒绝执行",
+					"target_changed", List.of()));
+			return ChatTurn.toolResult(request.toolCallId(), request.toolName(),
+					"{\"ok\":false,\"error_code\":\"target_changed\",\"message\":\"你在确认期间换了世界或维度，已拒绝执行\"}");
+		}
 		sink.onStatus(conversationId, TaskState.EXECUTING.name(), "", token.taskId());
 		ToolResult result = runTool(server, scoped, request, descriptor, token, sink);
 		emitResult(conversationId, requestId, token, request, result, sink);
 		return ChatTurn.toolResult(request.toolCallId(), request.toolName(), resultJson(result));
+	}
+
+	/** True when the preparation and the current context share a world. */
+	private static boolean sameWorld(ToolPreparation prep, ToolContext fresh) {
+		String world = fresh.worldId();
+		String dimension = fresh.dimensionId() == null ? "" : fresh.dimensionId().toString();
+		return prep.worldId().equals(world) && prep.dimensionId().equals(dimension);
 	}
 
 	/** Runs the preparer on the server thread. */
@@ -762,8 +780,32 @@ public final class AgentOrchestrator {
 				AgentTimeouts.DEFAULT_TOOL_SECONDS) + AgentTimeouts.TOOL_DISPATCH_GRACE_SECONDS;
 		try {
 			if (descriptor.longRunning()) {
-				// the tool owns its own budget; the orchestrator only waits longer
-				return tool.executor().execute(ctx, request, events);
+				// the tool owns its own budget, but a tool that hangs OUTSIDE
+				// its own subprocess would block a worker forever: a watchdog
+				// cancels the task when the declared budget is exceeded
+				java.util.concurrent.atomic.AtomicBoolean finished =
+						new java.util.concurrent.atomic.AtomicBoolean(false);
+				Thread watchdog = new Thread(() -> {
+					long deadline = System.currentTimeMillis() + budget * 1000L;
+					while (!finished.get() && System.currentTimeMillis() < deadline) {
+						try {
+							Thread.sleep(500);
+						} catch (InterruptedException e) {
+							Thread.currentThread().interrupt();
+							return;
+						}
+					}
+					if (!finished.get()) {
+						token.requestCancel();
+					}
+				}, "wf-tool-watchdog");
+				watchdog.setDaemon(true);
+				watchdog.start();
+				try {
+					return tool.executor().execute(ctx, request, events);
+				} finally {
+					finished.set(true);
+				}
 			}
 			AtomicReference<ToolResult> ref = new AtomicReference<>();
 			CountDownLatch latch = new CountDownLatch(1);
@@ -790,15 +832,56 @@ public final class AgentOrchestrator {
 		}
 	}
 
-	/** Builds the tool context. */
+	/**
+	 * Builds the tool context ON THE SERVER THREAD.
+	 *
+	 * <p>v0.7.1: the context reads the player's world and dimension. Reading
+	 * that from the agent's worker thread is not safe — the server thread may
+	 * be mutating the same state at that moment.</p>
+	 */
 	private static ToolContext context(MinecraftServer server, ServerPlayerEntity player,
 			String conversationId, ToolDescriptor descriptor, TaskToken token) {
-		var world = player.getServerWorld();
-		return new ToolContext(player, server, world, world.getRegistryKey(), conversationId,
-				descriptor.mutatesWorld()
-						? ToolContext.ToolScope.mutating(conversationId, java.util.Set.of(), java.util.Set.of())
-						: ToolContext.ToolScope.readOnly(conversationId),
-				token);
+		return onServerThread(server, () -> {
+			var world = player.getServerWorld();
+			return new ToolContext(player, server, world, world.getRegistryKey(), conversationId,
+					descriptor.mutatesWorld()
+							? ToolContext.ToolScope.mutating(conversationId, java.util.Set.of(), java.util.Set.of())
+							: ToolContext.ToolScope.readOnly(conversationId),
+					token);
+		});
+	}
+
+	/**
+	 * Runs a piece of work on the server thread and waits for its result.
+	 *
+	 * <p>Never called from the server thread itself (that would deadlock).</p>
+	 */
+	private static <T> T onServerThread(MinecraftServer server,
+			java.util.function.Supplier<T> work) {
+		AtomicReference<T> ref = new AtomicReference<>();
+		AtomicReference<Exception> err = new AtomicReference<>();
+		CountDownLatch latch = new CountDownLatch(1);
+		server.execute(() -> {
+			try {
+				ref.set(work.get());
+			} catch (Exception e) {
+				err.set(e);
+			} finally {
+				latch.countDown();
+			}
+		});
+		try {
+			if (!latch.await(AgentTimeouts.TOOL_PREPARE_SECONDS, TimeUnit.SECONDS)) {
+				return null;
+			}
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			return null;
+		}
+		if (err.get() != null) {
+			return null;
+		}
+		return ref.get();
 	}
 
 	private static void emitResult(String conversationId, String requestId, TaskToken token,

@@ -16,12 +16,16 @@ import java.util.List;
  * @param blockIds  block definition ids the operation will touch
  * @param summary   one-paragraph description shown in the chat confirm control
  * @param snapshot  identity snapshot re-validated at execution time
+ * @param worldId   the world the target was seen in
+ * @param dimensionId the dimension the target was seen in
  */
 public record ToolPreparation(
 		List<String> itemIds,
 		List<String> blockIds,
 		String summary,
-		String snapshot) {
+		String snapshot,
+		String worldId,
+		String dimensionId) {
 
 	public ToolPreparation {
 		itemIds = itemIds == null ? List.of() : List.copyOf(itemIds);
@@ -31,6 +35,12 @@ public record ToolPreparation(
 	}
 
 	public static ToolPreparation none() {
-		return new ToolPreparation(List.of(), List.of(), "", "");
+		return new ToolPreparation(List.of(), List.of(), "", "", "", "");
+	}
+
+	/** A preparation that is bound to a world and a dimension. */
+	public static ToolPreparation of(List<String> itemIds, List<String> blockIds, String summary,
+			String snapshot, String worldId, String dimensionId) {
+		return new ToolPreparation(itemIds, blockIds, summary, snapshot, worldId, dimensionId);
 	}
 }

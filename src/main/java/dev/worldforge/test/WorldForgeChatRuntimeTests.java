@@ -360,16 +360,20 @@ public class WorldForgeChatRuntimeTests {
 					return pendingOf(recorderB) != null;
 				}, () -> {
 			ctx.assertTrue(pendingOf(recorderB) != null, "B must be waiting for a confirmation");
-			ctx.assertTrue(AgentOrchestrator.stateOf(player.getUuid(), "conv-A") != null,
-					"A must still be running");
+			ctx.assertTrue(AgentOrchestrator.existingSession(player.getUuid(), "conv-A") != null,
+					"A must exist");
 
 			// delete B only
 			ctx.assertTrue(AgentOrchestrator.releaseSession(player.getUuid(), "conv-B"),
 					"deleting B must report success");
 
-			// A must still be running
-			ctx.assertTrue(AgentOrchestrator.stateOf(player.getUuid(), "conv-A") != null,
-					"deleting B must NOT stop A");
+			// A must NOT have been touched: its session is still there, and it
+			// was not cancelled (it may legitimately have FINISHED by now —
+			// what matters is that deleting B did not stop it)
+			ctx.assertTrue(AgentOrchestrator.existingSession(player.getUuid(), "conv-A") != null,
+					"deleting B must NOT remove A");
+			ctx.assertFalse(recorderA.sawState(AgentOrchestrator.TaskState.CANCELLED.name()),
+					"deleting B must NOT cancel A " + recorderA.dump());
 			// B must be gone, including its pending confirmation
 			ctx.assertTrue(AgentOrchestrator.existingSession(player.getUuid(), "conv-B") == null,
 					"the deleted session must be gone");
