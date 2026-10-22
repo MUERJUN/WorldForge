@@ -19,3 +19,9 @@ Thumbs.db
 logs/
 # docs/screenshots/ kept: v0.3.1 GUI evidence
 *.png.bak
+
+# v0.7.2: local API keys for the real-model acceptance run.
+# These are NEVER committed: the file is a local secret.
+apikey.txt
+**/apikey.txt
+*.apikey

@@ -57,6 +57,8 @@ public class WorldForge implements ModInitializer {
 		// v0.7.0: the chat-first protocol and the WF-Ops tool catalogue
 		dev.worldforge.network.WorldForgeChatProtocol.register();
 		dev.worldforge.ops.ToolCatalog.registerAll();
+		// v0.7.2: the hook that lets a VANILLA item carry a grafted behaviour
+		dev.worldforge.behavior.VanillaBehaviorHooks.register();
 		WorldForgeEvents.register();
 		WorldForgeCommand.register();
 

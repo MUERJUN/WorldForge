@@ -4,6 +4,7 @@ import dev.worldforge.ops.tools.BlockMutationTools;
 import dev.worldforge.ops.tools.CheckExportCapabilitiesTool;
 import dev.worldforge.ops.tools.ExportModTool;
 import dev.worldforge.ops.tools.GiveVirtualItemTool;
+import dev.worldforge.ops.tools.GraftBehaviorTool;
 import dev.worldforge.ops.tools.InspectContextTool;
 import dev.worldforge.ops.tools.InspectDefinitionTool;
 import dev.worldforge.ops.tools.ItemMutationTools;
@@ -54,6 +55,12 @@ public final class ToolCatalog {
 				BlockMutationTools.MODIFY_TARGET_PREPARER);
 		ToolRegistry.register(GiveVirtualItemTool.descriptor(), GiveVirtualItemTool.EXECUTOR,
 				GiveVirtualItemTool.PREPARER);
+
+		// ---- the player's own items (no admin authority, but still confirmed) ----
+		ToolRegistry.register(GraftBehaviorTool.graftDescriptor(), GraftBehaviorTool.GRAFT_EXEC,
+				GraftBehaviorTool.GRAFT_PREPARER);
+		ToolRegistry.register(GraftBehaviorTool.ungraftDescriptor(), GraftBehaviorTool.UNGRAFT_EXEC,
+				GraftBehaviorTool.UNGRAFT_PREPARER);
 
 		// ---- long running (must not block the server thread) ----
 		ToolRegistry.register(ExportModTool.descriptor(), ExportModTool.EXECUTOR, ExportModTool.PREPARER);

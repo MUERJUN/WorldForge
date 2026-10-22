@@ -50,11 +50,35 @@ import java.util.Locale;
  */
 public final class BehaviorEngine {
 
+	/**
+	 * The behaviours GRAFTED onto a stack, if any.
+	 *
+	 * <p>v0.7.2: this is what lets a vanilla item take part in the behaviour
+	 * engine. A stack with no graft simply has none.</p>
+	 */
+	public static java.util.List<BehaviorDefinition> graftBehaviors(ItemStack stack) {
+		if (stack == null) {
+			return java.util.List.of();
+		}
+		var graft = stack.get(WorldForgeComponents.BEHAVIOR_GRAFT);
+		return graft == null ? java.util.List.of() : graft.behaviors();
+	}
+
+	/** True when the stack carries a graft. */
+	public static boolean isGrafted(ItemStack stack) {
+		return stack != null && stack.contains(WorldForgeComponents.BEHAVIOR_GRAFT);
+	}
+
 	// ---------- trigger: right_click ----------
 
 	public static ActionResult onRightClick(ServerWorld world, ServerPlayerEntity player, ItemStack stack, Hand hand) {
 		ItemDefinition def = DynamicItem.definitionForLogic(stack);
-		if (def == null) {
+		// v0.7.2: a VANILLA item can carry grafted behaviours. The item keeps
+		// its identity; it only gains the ability to do something.
+		java.util.List<BehaviorDefinition> behaviors = def != null
+				? def.behaviors()
+				: graftBehaviors(stack);
+		if (def == null && behaviors.isEmpty()) {
 			// deleted/missing definition: identifiable inert state, never a crash (test F)
 			VirtualId vid = DynamicItem.virtualIdOf(stack);
 			if (player != null && vid != null) {
@@ -80,7 +104,7 @@ public final class BehaviorEngine {
 
 		boolean anyFired = false;
 		int cooldown = 0;
-		for (BehaviorDefinition b : def.behaviors()) {
+		for (BehaviorDefinition b : behaviors) {
 			if (!"right_click".equals(b.trigger())) {
 				continue;
 			}
@@ -101,7 +125,10 @@ public final class BehaviorEngine {
 
 	public static void onHitEntity(ServerWorld world, LivingEntity attacker, LivingEntity target, ItemStack stack) {
 		ItemDefinition def = DynamicItem.definitionForLogic(stack);
-		if (def == null || !(attacker instanceof PlayerEntity player)) {
+		java.util.List<BehaviorDefinition> behaviors = def != null
+				? def.behaviors()
+				: graftBehaviors(stack);
+		if ((def == null && behaviors.isEmpty()) || !(attacker instanceof PlayerEntity player)) {
 			return;
 		}
 		long now = world.getTime();
@@ -111,7 +138,7 @@ public final class BehaviorEngine {
 		}
 		boolean anyFired = false;
 		int cooldown = 0;
-		for (BehaviorDefinition b : def.behaviors()) {
+		for (BehaviorDefinition b : behaviors) {
 			if (!"hit_entity".equals(b.trigger())) {
 				continue;
 			}

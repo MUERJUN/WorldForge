@@ -26,5 +26,16 @@ public enum ToolPermission {
 	 * Heavier or irreversible operations (building an export artifact, deleting
 	 * data). Requires {@link #WRITE} authority plus its own confirmation.
 	 */
-	ADMIN
+	ADMIN,
+
+	/**
+	 * Changes something that belongs to the PLAYER alone — their own held
+	 * item, their own inventory.
+	 *
+	 * <p>v0.7.2: grafting a behaviour onto the sword in your own hand is not a
+	 * world modification, so it must not need admin authority — otherwise the
+	 * feature would be unusable for the players it is meant for. It still needs
+	 * an explicit confirmation, because it changes what the item can do.</p>
+	 */
+	SELF
 }

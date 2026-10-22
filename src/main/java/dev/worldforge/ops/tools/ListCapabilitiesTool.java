@@ -58,8 +58,9 @@ public final class ListCapabilitiesTool {
 
 		// ---- the honest limits ----
 		JsonArray limits = new JsonArray();
-		limits.add("不能给原版物品单独附加 WorldForge 行为。若玩家手里是原版物品，"
-				+ "可以创建一个外观相同的虚拟物品再交给玩家，但不能偷偷替换玩家原有武器。");
+		limits.add("可以给你手里正在拿着的物品附加 WorldForge 行为（graft_behavior）："
+				+ "物品本身、模型、耐久、附魔都不变，只是多了一个能力，并且可以撤销"
+				+ "（ungraft_behavior）。行为仍然受同样的白名单限制。");
 		limits.add("不能改造任意原版方块。改造只对 WorldForge 动态方块有效。");
 		limits.add("不能执行任意 Java 代码、Shell 或 PowerShell 命令；只有上面列出的结构化操作可用。");
 		limits.add("修改方块定义会影响世界里所有同 ID 的方块实例（共享定义），不是只改一个。");

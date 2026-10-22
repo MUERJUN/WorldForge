@@ -42,8 +42,6 @@ public final class MockToolProvider implements ModelProvider, ToolCallingProvide
 	/** when set, the answer is derived from the player's message */
 	private volatile java.util.function.Function<String, ChatTurn.Turn> byUserMessage;
 	public int calls = 0;
-	/** the newest user message of the current turn */
-	private volatile String lastUserMessage = "";
 
 	public MockToolProvider() {
 	}
@@ -117,9 +115,36 @@ public final class MockToolProvider implements ModelProvider, ToolCallingProvide
 		return this;
 	}
 
+	/** The newest USER turn of a message list, or an empty string. */
+	private static String newestUserMessage(List<ChatTurn> messages) {
+		for (int i = messages.size() - 1; i >= 0; i--) {
+			var m = messages.get(i);
+			if (m.role() == ChatTurn.Role.USER) {
+				return m.content();
+			}
+		}
+		return "";
+	}
+
 	/** The messages the "model" received, turn by turn. */
 	public List<List<ChatTurn>> receivedMessages() {
 		return List.copyOf(received);
+	}
+
+	/** A readable dump of what the "model" was asked, turn by turn. */
+	public String receivedDump() {
+		StringBuilder sb = new StringBuilder();
+		List<List<ChatTurn>> turns = receivedMessages();
+		for (int i = 0; i < turns.size(); i++) {
+			sb.append("turn").append(i).append(": ");
+			for (ChatTurn m : turns.get(i)) {
+				sb.append("[").append(m.role()).append("=");
+				String c = m.content();
+				sb.append(c.length() > 24 ? c.substring(0, 24) : c).append("] ");
+			}
+			sb.append(" | ");
+		}
+		return sb.toString();
 	}
 
 	/** The tool descriptors the "model" was offered. */
@@ -148,14 +173,12 @@ public final class MockToolProvider implements ModelProvider, ToolCallingProvide
 		CompletableFuture<ChatTurn.Turn> f = new CompletableFuture<>();
 		calls++;
 		received.add(List.copyOf(messages));
-		// the newest USER turn is what a message-driven provider reacts to
-		for (int i = messages.size() - 1; i >= 0; i--) {
-			var m = messages.get(i);
-			if (m.role() == ChatTurn.Role.USER) {
-				lastUserMessage = m.content();
-				break;
-			}
-		}
+		// The newest USER turn is what a message-driven provider reacts to.
+		//
+		// It is computed LOCALLY and handed to the answer function: as a field it
+		// was shared between concurrent calls, so two tasks talking to the
+		// provider at the same time could read each other's message.
+		final String userMessage = newestUserMessage(messages);
 		offeredTools.clear();
 		offeredTools.addAll(tools);
 		Thread t = new Thread(() -> {
@@ -169,7 +192,7 @@ public final class MockToolProvider implements ModelProvider, ToolCallingProvide
 				}
 				Object next = forcedCall != null ? new ChatTurn.Turn.Calls(List.of(forcedCall))
 						: (byUserMessage != null
-								? byUserMessage.apply(lastUserMessage)
+								? byUserMessage.apply(userMessage)
 								: script.poll());
 				if (next == null) {
 					next = new ChatTurn.Turn.Final(finalTextAfterTools);

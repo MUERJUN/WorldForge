@@ -12,13 +12,17 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# The action majors below are the current ones: actions/checkout@v7,
+# actions/setup-java@v6 and actions/upload-artifact@v7 run on the Node 24
+# runtime. The previous v4 majors used Node 20, which GitHub deprecated on
+# runners in September 2025.
 jobs:
   linux-export-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
@@ -43,7 +47,7 @@ jobs:
 
       - name: Upload evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-export-build-evidence
           path: |

@@ -159,7 +159,7 @@ class ChatClientStateTest {
 		dev.worldforge.ops.ToolCatalog.resetForTest();
 		dev.worldforge.ops.ToolCatalog.registerAll();
 		List<ToolDescriptor> tools = ToolRegistry.all();
-		assertEquals(12, tools.size(), "the catalogue must have exactly the 12 documented tools");
+		assertEquals(14, tools.size(), "the catalogue must have exactly the 14 documented tools");
 		for (ToolDescriptor d : tools) {
 			assertNotNull(d.permission(), d.name() + " has no permission level");
 			assertNotNull(d.description(), d.name() + " has no description");
@@ -178,8 +178,14 @@ class ChatClientStateTest {
 			boolean readOnly = d.permission() == ToolPermission.READ;
 			assertEquals(expectedReadOnly.contains(d.name()), readOnly,
 					d.name() + " has the wrong permission level");
-			assertEquals(!readOnly, d.mutatesWorld(),
-					d.name() + " disagrees with its permission level");
+			// a READ tool changes nothing at all — not the world, and not
+			// the player's own items either
+			if (readOnly) {
+				assertFalse(d.mutatesWorld(),
+						d.name() + " is read-only and must not change the world");
+				assertFalse(d.requiresConfirmation(),
+						d.name() + " is read-only and must not ask for a confirmation");
+			}
 		}
 	}
 

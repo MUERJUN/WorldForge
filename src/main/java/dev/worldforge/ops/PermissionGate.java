@@ -47,6 +47,11 @@ public final class PermissionGate {
 		if (descriptor.permission() == ToolPermission.READ) {
 			return null; // every player may look at their own context
 		}
+		if (descriptor.permission() == ToolPermission.SELF) {
+			// the change is confined to the player's own items — no admin
+			// authority is needed, but the operation still has to be confirmed
+			return null;
+		}
 		if (player == null) {
 			return ERR_NO_PERMISSION;
 		}

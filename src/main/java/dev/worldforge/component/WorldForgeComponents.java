@@ -45,6 +45,22 @@ public final class WorldForgeComponents {
 							.packetCodec(VirtualBlockId.PACKET_CODEC)
 							.build());
 
+	/**
+	 * The behaviours grafted onto a stack (v0.7.2).
+	 *
+	 * <p>Present on ANY item stack, vanilla included. The item keeps its
+	 * identity; it only gains the ability to do something. Removing the
+	 * component restores the stack completely.</p>
+	 */
+	public static final ComponentType<BehaviorGraft> BEHAVIOR_GRAFT =
+			Registry.register(
+					Registries.DATA_COMPONENT_TYPE,
+					WorldForge.id("behavior_graft"),
+					ComponentType.<BehaviorGraft>builder()
+							.codec(BehaviorGraft.CODEC)
+							.packetCodec(BehaviorGraft.PACKET_CODEC)
+							.build());
+
 	public static void register() {
 		// Class-initialisation registers; nothing to do here. Kept as an
 		// explicit hook so the init order in WorldForge#onInitialize is obvious.

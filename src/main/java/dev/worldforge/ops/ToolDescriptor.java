@@ -17,7 +17,9 @@ import java.util.Map;
  * @param description     one-paragraph purpose, shown to the model
  * @param parameters      JSON Schema (draft-07 subset) of the arguments
  * @param permission      authority level required to invoke it
- * @param mutatesWorld    true when a successful call changes world state
+ * @param mutatesWorld    true when a successful call changes the WORLD
+ *                        (a definition, a placed block, a file). A tool that
+ *                        changes only the player's own item does NOT set it.
  * @param requiresConfirmation true when the player must approve a summary first
  * @param longRunning     true when the call takes minutes (a Gradle build) and
  *                        therefore must NOT run on the server thread
@@ -61,6 +63,12 @@ public record ToolDescriptor(
 
 	public static ToolDescriptor admin(String name, String description, JsonObject parameters) {
 		return new ToolDescriptor(name, description, parameters, ToolPermission.ADMIN, true, true, false,
+				DEFAULT_TIMEOUT_SECONDS);
+	}
+
+	/** A tool that changes only the player's own items; no admin authority. */
+	public static ToolDescriptor self(String name, String description, JsonObject parameters) {
+		return new ToolDescriptor(name, description, parameters, ToolPermission.SELF, false, true, false,
 				DEFAULT_TIMEOUT_SECONDS);
 	}
 

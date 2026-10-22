@@ -137,7 +137,9 @@ class WfOpsToolLayerTest {
 				"inspect_context", "inspect_definition", "list_capabilities",
 				"check_export_capabilities", "create_item", "update_item",
 				"create_block", "update_block", "inspect_target_block",
-				"modify_target_block", "give_virtual_item", "export_mod")) {
+				"modify_target_block", "give_virtual_item", "export_mod",
+				// v0.7.2: the player's own item
+				"graft_behavior", "ungraft_behavior")) {
 			assertTrue(names.contains(expected), "missing tool: " + expected + " (have " + names + ")");
 		}
 	}
@@ -321,8 +323,17 @@ class WfOpsToolLayerTest {
 		@SuppressWarnings("unchecked")
 		var writable = (List<Map<String, Object>>) report.get("mutating_tools");
 		assertTrue(readable.stream().anyMatch(m -> "inspect_context".equals(m.get("name"))));
-		// WITHOUT a player no mutating tool may be offered at all — an
-		// authority-less caller must not even see the dangerous operations
-		assertTrue(writable.isEmpty(), "no mutating tool may be offered without authority: " + writable);
+		// WITHOUT a player only the tools that need no authority may be
+		// offered — an authority-less caller must not even see the dangerous
+		// operations
+		assertTrue(writable.stream().noneMatch(m ->
+						"create_item".equals(m.get("name"))
+								|| "update_item".equals(m.get("name"))
+								|| "export_mod".equals(m.get("name"))),
+				"no world-changing tool may be offered without authority: " + writable);
+		// the graft tools change only the player's own item: they need no
+		// admin authority, but they are still NOT read-only
+		assertTrue(writable.stream().anyMatch(m -> "graft_behavior".equals(m.get("name"))),
+				"the graft tool must be offered to any player: " + writable);
 	}
 }

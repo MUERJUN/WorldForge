@@ -121,8 +121,8 @@ public final class InspectContextTool {
 			} else {
 				target.addProperty("worldforge_virtual_id", "");
 				target.addProperty("worldforge_definition_exists", false);
-				target.addProperty("note", "这是原版方块，WorldForge 目前不能改造原版方块；"
-						+ "可以改用 WorldForge 动态方块实现同样的效果。");
+				target.addProperty("note", "这是原版方块。原版方块本身不能被改造；"
+						+ "可以改用一个 WorldForge 动态方块来实现同样的效果。");
 			}
 		} else {
 			target.addProperty("hit", false);

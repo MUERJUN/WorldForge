@@ -162,6 +162,25 @@ public final class ProposalValidator {
 		}
 	}
 
+	/**
+	 * Validates ONE behaviour against the same whitelist the definitions use.
+	 *
+	 * <p>v0.7.2: a behaviour grafted onto a vanilla item must obey EXACTLY
+	 * the same rules as a behaviour on a WorldForge definition — otherwise the
+	 * graft would be a way around the whitelist.</p>
+	 *
+	 * @return the problems found; empty when the behaviour is allowed
+	 */
+	public static List<String> validateBehavior(Proposal.BehaviorSpec spec) {
+		List<String> errs = new ArrayList<>();
+		if (spec == null) {
+			errs.add("missing behaviour");
+			return errs;
+		}
+		checkBehaviors(List.of(spec), errs);
+		return errs;
+	}
+
 	private static void checkBehaviors(List<Proposal.BehaviorSpec> behaviors, List<String> errs) {
 		if (behaviors == null) {
 			return;
