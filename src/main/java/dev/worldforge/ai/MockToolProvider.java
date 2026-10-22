@@ -30,9 +30,32 @@ public final class MockToolProvider implements ModelProvider, ToolCallingProvide
 	private volatile ChatTurn.ModelToolCall forcedCall;
 	/** when true, every turn after the first is a final text */
 	private volatile String finalTextAfterTools = "";
+	/** how long a turn takes before it answers (v0.7.1: for the race tests) */
+	private volatile long delayMillis = 0;
+	/**
+	 * v0.7.1: when true the provider answers EVEN AFTER the future was
+	 * cancelled. It emulates a service that does not honour a cancellation,
+	 * and it is how the tests prove that a late answer of an old task cannot
+	 * touch the state of the task that replaced it.
+	 */
+	private volatile boolean ignoreCancellation = false;
+	/** when set, the answer is derived from the player's message */
+	private volatile java.util.function.Function<String, ChatTurn.Turn> byUserMessage;
 	public int calls = 0;
+	/** the newest user message of the current turn */
+	private volatile String lastUserMessage = "";
 
-	private MockToolProvider() {
+	public MockToolProvider() {
+	}
+
+	/**
+	 * A provider that always answers with the same text.
+	 *
+	 * <p>Kept for the same shape the legacy mock had, so the older tests keep
+	 * working.</p>
+	 */
+	public MockToolProvider(java.util.function.BiFunction<String, String, String> reply) {
+		this.finalTextAfterTools = reply.apply("", "");
 	}
 
 	/** A provider that walks the given script and then repeats the last entry. */
@@ -59,6 +82,38 @@ public final class MockToolProvider implements ModelProvider, ToolCallingProvide
 	/** Always answers with the same call (for loop tests). */
 	public MockToolProvider alwaysCall(String toolName, String argumentsJson) {
 		this.forcedCall = new ChatTurn.ModelToolCall("call_" + (calls + 1), toolName, argumentsJson);
+		return this;
+	}
+
+	/** A provider that always answers with the same text. */
+	public static MockToolProvider answering(String reply) {
+		return new MockToolProvider((s, u) -> reply);
+	}
+
+	/**
+	 * A provider that decides its answer from the PLAYER'S MESSAGE.
+	 *
+	 * <p>v0.7.1: the provider is global static state and the GameTest runner
+	 * runs the batches concurrently, so a per-test scripted provider would be
+	 * overwritten by another test at any moment. A message-driven provider can
+	 * be SHARED by every test without that race.</p>
+	 */
+	public static MockToolProvider responding(
+			java.util.function.Function<String, ChatTurn.Turn> byUserMessage) {
+		MockToolProvider p = new MockToolProvider();
+		p.byUserMessage = byUserMessage;
+		return p;
+	}
+
+	/** Makes every turn take {@code millis} before it answers. */
+	public MockToolProvider withDelay(long millis) {
+		this.delayMillis = millis;
+		return this;
+	}
+
+	/** Lets the provider answer even after its future was cancelled. */
+	public MockToolProvider ignoringCancellation() {
+		this.ignoreCancellation = true;
 		return this;
 	}
 
@@ -93,6 +148,14 @@ public final class MockToolProvider implements ModelProvider, ToolCallingProvide
 		CompletableFuture<ChatTurn.Turn> f = new CompletableFuture<>();
 		calls++;
 		received.add(List.copyOf(messages));
+		// the newest USER turn is what a message-driven provider reacts to
+		for (int i = messages.size() - 1; i >= 0; i--) {
+			var m = messages.get(i);
+			if (m.role() == ChatTurn.Role.USER) {
+				lastUserMessage = m.content();
+				break;
+			}
+		}
 		offeredTools.clear();
 		offeredTools.addAll(tools);
 		Thread t = new Thread(() -> {
@@ -101,14 +164,27 @@ public final class MockToolProvider implements ModelProvider, ToolCallingProvide
 				return;
 			}
 			try {
+				if (delayMillis > 0) {
+					Thread.sleep(delayMillis);
+				}
 				Object next = forcedCall != null ? new ChatTurn.Turn.Calls(List.of(forcedCall))
-						: script.poll();
+						: (byUserMessage != null
+								? byUserMessage.apply(lastUserMessage)
+								: script.poll());
 				if (next == null) {
 					next = new ChatTurn.Turn.Final(finalTextAfterTools);
 				} else if (next instanceof String s) {
 					next = new ChatTurn.Turn.Final(s);
 				}
-				f.complete((ChatTurn.Turn) next);
+				if (ignoreCancellation) {
+					// the answer arrives even though the caller gave up on it
+					f.complete((ChatTurn.Turn) next);
+				} else {
+					f.complete((ChatTurn.Turn) next);
+				}
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				f.completeExceptionally(e);
 			} catch (Throwable e) {
 				f.completeExceptionally(e);
 			}

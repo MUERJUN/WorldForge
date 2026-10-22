@@ -196,7 +196,7 @@ public final class ExportModTool {
 						"导出在取消到达之前已经完成，产物已保留：" + result.jarPath());
 			}
 			o.addProperty("error", result.errorMessage() == null ? "已取消" : result.errorMessage());
-			return ToolResult.fail("export_cancelled", "导出已取消，构建进程已终止，产物已清理。");
+			return ToolResult.cancelled("导出已取消，构建进程已终止，产物已清理。", o.toString());
 		}
 		if (result.ok()) {
 			Path jar = result.jarPath();

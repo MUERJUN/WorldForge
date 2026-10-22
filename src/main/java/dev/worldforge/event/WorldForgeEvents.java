@@ -70,6 +70,10 @@ public final class WorldForgeEvents {
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
 			// AI sessions are per-connection: no cross-world/cross-server reuse
 			dev.worldforge.ai.AgentBridge.releasePlayer(handler.player.getUuid());
+			// v0.7.1: the CHAT runtime must be cleaned up as well — a
+			// disconnected player's running task would otherwise keep working
+			// (and keep its confirmation pending) after they left.
+			dev.worldforge.network.WorldForgeChatProtocol.releasePlayer(handler.player.getUuid());
 		});
 
 		WorldForge.LOGGER.info("[WorldForge] event listeners registered (once)");

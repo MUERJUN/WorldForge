@@ -167,6 +167,13 @@ public final class AgentOrchestrator {
 		Session(String conversationId) {
 			this.conversationId = conversationId;
 		}
+
+		/** A read-only view of the conversation history. */
+		public List<ChatTurn> historyView() {
+			synchronized (history) {
+				return List.copyOf(history);
+			}
+		}
 	}
 
 	private AgentOrchestrator() {
@@ -797,7 +804,7 @@ public final class AgentOrchestrator {
 	private static void emitResult(String conversationId, String requestId, TaskToken token,
 			ToolRequest request, ToolResult result, AgentEventSink sink) {
 		ToolEventStatus status;
-		if (token.isCancelled() && result.ok()) {
+		if (result.cancelled() || (token.isCancelled() && result.ok())) {
 			// a cancellation that arrived while the tool was finishing: the
 			// operation may well have happened — say so, do not claim success
 			status = ToolEventStatus.CANCELLED;

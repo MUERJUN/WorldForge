@@ -81,7 +81,7 @@ public class WorldForgeChatFlowTests {
 	/**
 	 * Flow A: the held virtual weapon really gains the new behaviour.
 	 */
-	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-chat", tickLimit = 1200)
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-chat-flowA", tickLimit = 1200)
 	public void flowA_heldWeaponGainsBehaviourAndReallyWorks(TestContext ctx) {
 		var dir = TestTempDirs.create("wf-flow-a");
 		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
@@ -166,7 +166,7 @@ public class WorldForgeChatFlowTests {
 	/**
 	 * Flow B: the targeted dynamic block really changes, and keeps the change.
 	 */
-	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-chat", tickLimit = 1200)
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-chat-flowB", tickLimit = 1200)
 	public void flowB_targetedBlockChangesAndReallyWorks(TestContext ctx) {
 		var dir = TestTempDirs.create("wf-flow-b");
 		BlockRuntimeManager.attachStoreForTesting(new BlockDefinitionStore(dir));
