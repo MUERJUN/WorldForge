@@ -7,7 +7,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 - 游戏版本：Minecraft Java **1.21.1**
 - 加载器：Fabric Loader **0.16.9** + Fabric API **0.116.5+1.21.1**
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**
-- 当前版本：**v0.7.0 Public Beta**
+- 当前版本：**v0.7.1 Public Beta Maintenance**
 
 ---
 
@@ -16,7 +16,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 **普通玩家安装（无需开发环境）：**
 
 1. 安装 [Fabric Loader 0.16.9](https://fabricmc.net/use/installer/)，选择 Minecraft **1.21.1**。
-2. 下载 [Fabric API 0.116.5+1.21.1](https://modrinth.com/mod/fabric-api) 与 GitHub Release 的 `worldforge-0.7.0.jar`。
+2. 下载 [Fabric API 0.116.5+1.21.1](https://modrinth.com/mod/fabric-api) 与 GitHub Release 的 `worldforge-0.7.1.jar`。
 3. 把两个 JAR 放入 `.minecraft/mods/`，启动游戏。
 4. 进入单人世界，按 **K** 打开 **AI 聊天**。
 5. 第一次使用先点聊天右上角 **⚙ 设置**，填入 API Key（单人游戏直接生效，重启无效）。
@@ -41,6 +41,21 @@ AI 自己判断该做什么、在游戏里执行，并把**真实发生的每一
 ./gradlew runGameTest     # 真实服务端 GameTest
 ./gradlew runClient       # 进游戏：按 K 打开 AI 聊天
 ```
+
+---
+
+## v0.7.1 — Chat Runtime 可靠性维护
+
+**核心体验不变（按 K 就是聊天）。这一版只修可靠性：玩家在聊天里看到的每一个任务状态，都与后台真实执行状态一致。**
+
+- 同一会话**同时只有一个活动任务**：第二条消息会明确排队（上限 4）或明确拒绝，不会并行执行。
+- 每个任务有自己的 `taskId` / 取消令牌 / generation：慢的旧任务无法踩掉新任务的状态，迟到回答也不会写进历史。
+- 删除一个会话**只释放该会话**（旧实现会把该玩家的所有会话一起停掉）。
+- 确认/拒绝是**互斥终态**：空确认 ID 不再能确认任意待办，确认后拒绝不会误报"已取消"。
+- 取消**真的取消**：玩家的取消会终止 Gradle 子进程树，不会留下可用的 JAR，也不会谎报失败。
+- 断线现在会清理聊天运行时的任务与待确认操作（此前是死代码）。
+
+详见 [CHANGELOG.md](CHANGELOG.md#v071-public-beta-maintenance--chat-runtime-可靠性)。
 
 ---
 

@@ -34,12 +34,12 @@ public final class ChatClientState {
 	private static volatile String lastServerNotice = "";
 	/** monotonically increasing request id for outgoing requests */
 	private static int nextRequestId = 1;
-	/** the client-side ids of the requests that were already shown */
-	private static final java.util.Set<String> SEEN_REQUEST_IDS =
-			java.util.Collections.synchronizedSet(new java.util.LinkedHashSet<>());
-	/** conversations the player deleted: their late events are dropped */
-	private static final java.util.Set<String> DELETED_CONVERSATIONS =
-			java.util.Collections.synchronizedSet(new java.util.LinkedHashSet<>());
+	/**
+	 * The rules that keep the chat in step with the server. They live in the
+	 * MAIN source set so the ordinary unit suite can cover them.
+	 */
+	private static final dev.worldforge.chat.ChatEventRouter ROUTER =
+			new dev.worldforge.chat.ChatEventRouter();
 
 	private ChatClientState() {
 	}
@@ -76,7 +76,7 @@ public final class ChatClientState {
 	public static synchronized void switchTo(String conversationId) {
 		load();
 		activeId = conversationId == null || conversationId.isBlank() ? "default" : conversationId;
-		DELETED_CONVERSATIONS.remove(activeId);
+		ROUTER.markUsed(activeId);
 		SESSIONS.computeIfAbsent(activeId, ChatSession::new);
 	}
 
@@ -97,7 +97,7 @@ public final class ChatClientState {
 		SESSIONS.remove(conversationId);
 		ChatStore.delete(conversationId);
 		// a late event of this conversation must not bring it back
-		DELETED_CONVERSATIONS.add(conversationId);
+		ROUTER.markDeleted(conversationId);
 		if (conversationId.equals(activeId)) {
 			activeId = SESSIONS.isEmpty() ? "default" : SESSIONS.keySet().iterator().next();
 			SESSIONS.computeIfAbsent(activeId, ChatSession::new);
@@ -130,7 +130,6 @@ public final class ChatClientState {
 		body.addProperty("message", trimmed);
 		// the client-side id lets the server echo be recognised as a duplicate
 		String clientRequestId = "c" + (nextRequestId++);
-		SEEN_REQUEST_IDS.add(clientRequestId);
 		body.addProperty("clientRequestId", clientRequestId);
 		// send a little context so a restored conversation keeps its thread
 		String context = session.recentContext(6);
@@ -203,11 +202,8 @@ public final class ChatClientState {
 					if ("user".equals(role)) {
 						// the client already shows the message it sent, so the
 						// server echo only CONFIRMS it
-						if (!clientRequestId.isBlank() && SEEN_REQUEST_IDS.contains(clientRequestId)) {
-							return;
-						}
-						if (!clientRequestId.isBlank()) {
-							SEEN_REQUEST_IDS.add(clientRequestId);
+						if (ROUTER.isDuplicateUserMessage(clientRequestId)) {
+							return; // the client already shows this message
 						}
 						if (s.messages().stream().noneMatch(m -> m.role() == ChatMessage.Role.PLAYER
 								&& m.text().equals(text))) {
@@ -314,7 +310,7 @@ public final class ChatClientState {
 		if (conversationId == null || conversationId.isBlank()) {
 			return null;
 		}
-		if (DELETED_CONVERSATIONS.contains(conversationId)) {
+		if (ROUTER.isDeleted(conversationId)) {
 			return null;
 		}
 		return SESSIONS.computeIfAbsent(conversationId, ChatSession::new);
@@ -351,7 +347,6 @@ public final class ChatClientState {
 		SESSIONS.clear();
 		activeId = "default";
 		lastServerNotice = "";
-		SEEN_REQUEST_IDS.clear();
-		DELETED_CONVERSATIONS.clear();
+		ROUTER.reset();
 	}
 }

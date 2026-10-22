@@ -221,6 +221,29 @@ public class WorldForgeChatScreen extends Screen {
 		}
 	}
 
+	/**
+	 * The running indicator the header shows, or an empty string when no task
+	 * is running.
+	 *
+	 * <p>Used by the client auto-test to prove that the indicator follows the
+	 * REAL task state (a confirmation is not "done", and a cancel request is
+	 * not "stopped").</p>
+	 */
+	public String busyIndicator() {
+		var session = ChatClientState.active();
+		if (!session.busy()) {
+			return "";
+		}
+		return switch (session.taskState()) {
+			case THINKING -> "思考中…";
+			case AWAITING_CONFIRMATION -> "等待确认";
+			case EXECUTING -> "执行中…";
+			case CANCELLING -> "取消中…";
+			case QUEUED -> "排队中";
+			default -> "…";
+		};
+	}
+
 	private void renderHeader(DrawContext ctx) {
 		ChatSession session = ChatClientState.active();
 		String title = session.title();

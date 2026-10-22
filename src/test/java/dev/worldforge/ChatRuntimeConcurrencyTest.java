@@ -283,7 +283,7 @@ class ChatRuntimeConcurrencyTest {
 		assertTrue(AgentTimeouts.EXPORT_TOOL_SECONDS
 				> AgentTimeouts.GRADLE_BUILD_MINUTES * 60,
 				"the export tool's budget must exceed the Gradle build time");
-		ToolRegistry.resetForTest();
+		dev.worldforge.ops.ToolCatalog.resetForTest();
 		dev.worldforge.ops.ToolCatalog.registerAll();
 		var exportTool = ToolRegistry.descriptor("export_mod");
 		assertTrue(exportTool.isPresent());
@@ -294,7 +294,7 @@ class ChatRuntimeConcurrencyTest {
 
 	@Test
 	void everyToolDeclaresABudget() {
-		ToolRegistry.resetForTest();
+		dev.worldforge.ops.ToolCatalog.resetForTest();
 		dev.worldforge.ops.ToolCatalog.registerAll();
 		for (ToolDescriptor d : ToolRegistry.all()) {
 			assertTrue(d.timeoutSeconds() > 0, d.name() + " has no budget");
