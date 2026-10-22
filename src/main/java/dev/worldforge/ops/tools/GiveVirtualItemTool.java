@@ -60,14 +60,26 @@ public final class GiveVirtualItemTool {
 			return ToolResult.fail("not_found", "无法创建该虚拟物品（定义可能已失效）: " + id);
 		}
 		boolean dropped = false;
+		boolean lost = false;
 		if (!ctx.player().getInventory().insertStack(stack)) {
-			ctx.player().dropItem(stack, false);
-			dropped = true;
+			// v0.7.1: dropItem returns null when the item could NOT be
+			// dropped — the old code ignored that and reported success while
+			// the item was simply destroyed.
+			lost = ctx.player().dropItem(stack, false) == null;
+			dropped = !lost;
+		}
+		if (!ctx.scope().mayWriteItem(id)) {
+			return ToolResult.fail("out_of_scope", "这个物品不在你确认的范围内：" + id);
 		}
 		JsonObject o = new JsonObject();
 		o.addProperty("id", id);
 		o.addProperty("count", count);
 		o.addProperty("dropped_at_feet", dropped);
+		if (lost) {
+			o.addProperty("lost", true);
+			return ToolResult.fail("give_failed",
+					"背包已满，而且物品无法掉落在地上——物品没有送达。", o.toString());
+		}
 		return new ToolResult(true, "",
 				dropped ? "背包已满，" + def.name() + " x" + count + " 已掉落在脚下"
 						: "已获得 " + def.name() + " x" + count,
@@ -86,7 +98,9 @@ public final class GiveVirtualItemTool {
 			return ToolPreparation.none();
 		}
 		int count = Math.max(1, Math.min(64, request.argumentInt("count", 1)));
-		return new ToolPreparation(List.of(id), List.of(),
-				"将把「" + def.name() + "」(" + id + ") x" + count + " 交给你自己。", "");
+		return ToolPreparation.of(List.of(id), List.of(),
+				"将把「" + def.name() + "」(" + id + ") x" + count + " 交给你自己。", "",
+				ctx.world() == null ? "" : ctx.worldId(),
+				ctx.dimensionId() == null ? "" : ctx.dimensionId().toString());
 	};
 }

@@ -57,8 +57,8 @@ public final class CheckExportCapabilitiesTool {
 	}
 
 	public static final ToolExecutor EXECUTOR = (ctx, request, sink) -> {
-		List<String> itemIds = stringList(request, "item_ids");
-		List<String> blockIds = stringList(request, "block_ids");
+		List<String> itemIds = normalize(stringList(request, "item_ids"));
+		List<String> blockIds = normalize(stringList(request, "block_ids"));
 		if (itemIds.isEmpty() && blockIds.isEmpty()) {
 			return ToolResult.fail("invalid_arguments", "至少需要一个物品或方块 id");
 		}
@@ -89,6 +89,18 @@ public final class CheckExportCapabilitiesTool {
 		return ToolResult.ok("已生成导出能力报告", o.toString());
 	};
 
+	/** Normalises the ids the way every other tool does. */
+	private static List<String> normalize(List<String> ids) {
+		List<String> out = new java.util.ArrayList<>();
+		for (String id : ids) {
+			String n = dev.worldforge.tool.WorldForgeTools.normalizeId(id);
+			if (n != null && !n.isBlank()) {
+				out.add(n);
+			}
+		}
+		return out;
+	}
+
 	/** Reads a list-of-strings argument. */
 	public static List<String> stringList(ToolRequest request, String key) {
 		List<String> out = new ArrayList<>();
@@ -114,9 +126,12 @@ public final class CheckExportCapabilitiesTool {
 	}
 
 	/** Shared helper for the export tool's preparation step. */
-	public static ToolPreparation prepareExport(ToolRequest request, String summary) {
+	public static ToolPreparation prepareExport(dev.worldforge.ops.ToolContext ctx, ToolRequest request,
+			String summary) {
 		List<String> itemIds = stringList(request, "item_ids");
 		List<String> blockIds = stringList(request, "block_ids");
-		return new ToolPreparation(itemIds, blockIds, summary, "");
+		return ToolPreparation.of(itemIds, blockIds, summary, "",
+				ctx.world() == null ? "" : ctx.worldId(),
+				ctx.dimensionId() == null ? "" : ctx.dimensionId().toString());
 	}
 }

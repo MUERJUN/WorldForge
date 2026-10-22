@@ -18,6 +18,10 @@ import java.util.List;
  * @param persisted      the change reached durable storage
  * @param applied        the change reached live server state
  * @param syncStatus     client snapshot broadcast status
+ * @param cancelled      true when the operation was CANCELLED (not merely
+ *                        failed). A cancellation is a different outcome: the
+ *                        player asked for it, so the chat must say so instead
+ *                        of reporting a failure.
  */
 public record ToolResult(
 		boolean ok,
@@ -27,7 +31,8 @@ public record ToolResult(
 		List<String> affectedTargets,
 		boolean persisted,
 		boolean applied,
-		String syncStatus) {
+		String syncStatus,
+		boolean cancelled) {
 
 	public ToolResult {
 		errorCode = errorCode == null ? "" : errorCode;
@@ -35,6 +40,12 @@ public record ToolResult(
 		dataJson = dataJson == null ? "{}" : dataJson;
 		affectedTargets = affectedTargets == null ? List.of() : List.copyOf(affectedTargets);
 		syncStatus = syncStatus == null ? "none" : syncStatus;
+	}
+
+	/** The compact form without the cancellation flag. */
+	public ToolResult(boolean ok, String errorCode, String displayText, String dataJson,
+			List<String> affectedTargets, boolean persisted, boolean applied, String syncStatus) {
+		this(ok, errorCode, displayText, dataJson, affectedTargets, persisted, applied, syncStatus, false);
 	}
 
 	/** Successful read-only result. */
@@ -50,6 +61,23 @@ public record ToolResult(
 	/** Failure with a stable error code the model can react to. */
 	public static ToolResult fail(String errorCode, String displayText) {
 		return new ToolResult(false, errorCode, displayText, "{}", List.of(), false, false, "none");
+	}
+
+	/** Failure that also carries data for the model. */
+	public static ToolResult fail(String errorCode, String displayText, String dataJson) {
+		return new ToolResult(false, errorCode, displayText, dataJson, List.of(), false, false, "none");
+	}
+
+	/**
+	 * The operation was CANCELLED — it did not fail, the player asked for it.
+	 *
+	 * <p>v0.7.1: a cancelled export used to be reported as a failure, so the
+	 * chat told the player their build "failed" after they had cancelled it.
+	 * The chat must show what actually happened.</p>
+	 */
+	public static ToolResult cancelled(String displayText, String dataJson) {
+		return new ToolResult(false, "cancelled", displayText, dataJson, List.of(), false, false,
+				"none", true);
 	}
 
 	/**

@@ -82,8 +82,12 @@ public final class ChatAutoTest {
 			switch (step++) {
 				case 0 -> {
 					// the chat needs a SERVER to talk to, so wait for the world
-					// to be loaded before starting the acceptance run
-					if (client.world == null || client.getNetworkHandler() == null) {
+					// to be loaded before starting the acceptance run. The screen
+					// must also be FREE: the key handler deliberately refuses to
+					// steal a screen that is already open (a loading screen
+					// would otherwise swallow the key press).
+					if (client.world == null || client.getNetworkHandler() == null
+							|| client.currentScreen != null) {
 						report.add("[WAIT] waiting for the world to load");
 						wait(20);
 						step = 0;
@@ -185,14 +189,29 @@ public final class ChatAutoTest {
 					}
 				}
 				case 9 -> {
-					// the running state and the cancel control
+					// the running indicator must follow the REAL task state:
+					// "confirmed" is not "done", and "cancel requested" is not
+					// "stopped"
 					var screen = chat(client);
-					if (screen != null) {
-						screen.setRunningForTest(true);
-						wait(2);
-						shot(client, "06-running");
-						screen.setRunningForTest(false);
+					if (screen == null) {
+						fail("the chat must be open");
+						finish(client);
+						return;
 					}
+					var session = ChatClientState.active();
+					session.setTaskState(dev.worldforge.chat.ChatTaskState.THINKING);
+					wait(2);
+					check("a thinking task shows an indicator", screen.busyIndicator().contains("思考"));
+					screen.setRunningForTest(true);
+					wait(2);
+					check("an executing task shows an indicator", screen.busyIndicator().contains("执行"));
+					shot(client, "06-running");
+					session.setTaskState(dev.worldforge.chat.ChatTaskState.AWAITING_CONFIRMATION);
+					wait(2);
+					check("a waiting task shows an indicator", screen.busyIndicator().contains("等待"));
+					screen.setRunningForTest(false);
+					wait(2);
+					check("a finished task shows no indicator", screen.busyIndicator().isEmpty());
 				}
 				case 10 -> {
 					// the settings entry

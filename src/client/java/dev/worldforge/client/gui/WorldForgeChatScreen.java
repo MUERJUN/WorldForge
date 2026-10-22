@@ -3,6 +3,7 @@ package dev.worldforge.client.gui;
 import dev.worldforge.client.chat.ChatClientState;
 import dev.worldforge.chat.ChatMessage;
 import dev.worldforge.chat.ChatSession;
+import dev.worldforge.chat.ChatTaskState;
 import dev.worldforge.client.chat.ChatUi;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
@@ -220,6 +221,29 @@ public class WorldForgeChatScreen extends Screen {
 		}
 	}
 
+	/**
+	 * The running indicator the header shows, or an empty string when no task
+	 * is running.
+	 *
+	 * <p>Used by the client auto-test to prove that the indicator follows the
+	 * REAL task state (a confirmation is not "done", and a cancel request is
+	 * not "stopped").</p>
+	 */
+	public String busyIndicator() {
+		var session = ChatClientState.active();
+		if (!session.busy()) {
+			return "";
+		}
+		return switch (session.taskState()) {
+			case THINKING -> "思考中…";
+			case AWAITING_CONFIRMATION -> "等待确认";
+			case EXECUTING -> "执行中…";
+			case CANCELLING -> "取消中…";
+			case QUEUED -> "排队中";
+			default -> "…";
+		};
+	}
+
 	private void renderHeader(DrawContext ctx) {
 		ChatSession session = ChatClientState.active();
 		String title = session.title();
@@ -228,8 +252,21 @@ public class WorldForgeChatScreen extends Screen {
 		ctx.drawTextWithShadow(textRenderer, ChatUi.clip(textRenderer, title, Math.max(20, avail)),
 				tx, panelY + 7, ChatUi.TEXT);
 		if (session.busy()) {
-			String busy = "…";
-			ctx.drawTextWithShadow(textRenderer, busy, panelX + panelW - PAD - 26, panelY + 7, ChatUi.ACCENT);
+			// the indicator follows the REAL task state, so "confirmed but
+			// still running" does not look like "finished"
+			String mark = switch (session.taskState()) {
+				case THINKING -> "思考中…";
+				case AWAITING_CONFIRMATION -> "等待确认";
+				case EXECUTING -> "执行中…";
+				case CANCELLING -> "取消中…";
+				case QUEUED -> "排队中";
+				default -> "…";
+			};
+			int color = session.taskState() == ChatTaskState.AWAITING_CONFIRMATION
+					? ChatUi.TEXT_WARN : ChatUi.ACCENT;
+			ctx.drawTextWithShadow(textRenderer, mark,
+					panelX + panelW - PAD - 26 - textRenderer.getWidth(mark),
+					panelY + 7, color);
 		}
 	}
 
@@ -359,7 +396,7 @@ public class WorldForgeChatScreen extends Screen {
 
 	private void renderFooter(DrawContext ctx) {
 		ChatSession session = ChatClientState.active();
-		if (session.hasPendingConfirmation()) {
+		if (session.awaitingConfirmation()) {
 			ctx.drawText(textRenderer, "等待你确认上面的操作", listX + 110,
 					panelY + panelH - FOOTER_H + 4, ChatUi.TEXT_WARN, false);
 		}
@@ -511,7 +548,9 @@ public class WorldForgeChatScreen extends Screen {
 
 	/** Forces the "running" state so the cancel control can be checked. */
 	public void setRunningForTest(boolean running) {
-		ChatClientState.active().setBusy(running);
+		ChatClientState.active().setTaskState(running
+				? dev.worldforge.chat.ChatTaskState.EXECUTING
+				: dev.worldforge.chat.ChatTaskState.IDLE);
 		refreshButtons();
 	}
 

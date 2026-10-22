@@ -137,14 +137,20 @@ public final class WorldForgeChatProtocol {
 		if (seed != null && seed.length() > MAX_HISTORY_CHARS) {
 			seed = null;
 		}
+		String clientRequestId = str(body, "clientRequestId");
 		rememberConversation(player, conversationId);
 		if (!isToolCallingAvailable()) {
-			pushStatus(player, req.requestId(), conversationId, "error",
-					"AI 未启用：服务器未配置 config/worldforge/agent.json（需要 apiKey）。");
+			pushStatus(player, req.requestId(), conversationId,
+					AgentOrchestrator.TaskState.FAILED.name(),
+					"AI 未启用：服务器未配置 config/worldforge/agent.json（需要 apiKey）。", "");
 			return;
 		}
-		AgentOrchestrator.send(server, player, conversationId, message, seed,
-				new PushSink(player));
+		var result = AgentOrchestrator.send(server, player, conversationId, message, seed,
+				new PushSink(player, clientRequestId));
+		if (!result.accepted() && !result.queued()) {
+			pushStatus(player, req.requestId(), conversationId,
+					AgentOrchestrator.TaskState.FAILED.name(), result.reason(), result.taskId());
+		}
 	}
 
 	private static void handleConfirm(ServerPlayerEntity player, ChatRequest req) {
@@ -152,8 +158,12 @@ public final class WorldForgeChatProtocol {
 		String conversationId = str(body, "conversationId");
 		String confirmationId = str(body, "confirmationId");
 		boolean ok = AgentOrchestrator.confirm(player.getUuid(), conversationId, confirmationId);
-		pushStatus(player, req.requestId(), conversationId, ok ? "info" : "error",
-				ok ? "已确认，服务器正在执行…" : "没有待确认的操作");
+		// "confirmed" is NOT "done": the task is still running, so the state
+		// stays EXECUTING and the client keeps the busy indicator on
+		pushStatus(player, req.requestId(), conversationId,
+				ok ? AgentOrchestrator.TaskState.EXECUTING.name()
+						: AgentOrchestrator.TaskState.FAILED.name(),
+				ok ? "已确认，服务器正在执行…" : "没有待确认的操作", "");
 	}
 
 	private static void handleDeny(ServerPlayerEntity player, ChatRequest req) {
@@ -161,16 +171,22 @@ public final class WorldForgeChatProtocol {
 		String conversationId = str(body, "conversationId");
 		String confirmationId = str(body, "confirmationId");
 		boolean ok = AgentOrchestrator.deny(player.getUuid(), conversationId, confirmationId);
-		pushStatus(player, req.requestId(), conversationId, ok ? "info" : "error",
-				ok ? "已取消，世界数据未发生任何变化" : "没有待确认的操作");
+		pushStatus(player, req.requestId(), conversationId,
+				ok ? AgentOrchestrator.TaskState.CANCELLED.name()
+						: AgentOrchestrator.TaskState.FAILED.name(),
+				ok ? "已取消，世界数据未发生任何变化" : "没有待确认的操作", "");
 	}
 
 	private static void handleCancel(ServerPlayerEntity player, ChatRequest req) {
 		JsonObject body = parse(req.payload());
 		String conversationId = str(body, "conversationId");
 		boolean ok = AgentOrchestrator.cancelTask(player.getUuid(), conversationId);
-		pushStatus(player, req.requestId(), conversationId, ok ? "info" : "error",
-				ok ? "已请求取消当前任务" : "当前没有正在执行的任务");
+		// a cancel REQUEST is not a cancellation: the task reports its own
+		// terminal state when it has really stopped
+		pushStatus(player, req.requestId(), conversationId,
+				ok ? AgentOrchestrator.TaskState.CANCELLING.name()
+						: AgentOrchestrator.TaskState.FAILED.name(),
+				ok ? "已请求取消当前任务" : "当前没有正在执行的任务", "");
 	}
 
 	private static void handleListSessions(ServerPlayerEntity player, ChatRequest req) {
@@ -192,9 +208,12 @@ public final class WorldForgeChatProtocol {
 				v.remove(conversationId);
 				return v.isEmpty() ? null : v;
 			});
-			AgentOrchestrator.releasePlayer(player.getUuid());
+			// v0.7.1: release ONLY this conversation. The old code called
+			// releasePlayer(), which cancelled EVERY conversation of the player.
+			AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
 		}
-		pushStatus(player, req.requestId(), conversationId, "info", "会话已删除");
+		pushStatus(player, req.requestId(), conversationId,
+				AgentOrchestrator.TaskState.CANCELLED.name(), "会话已删除", "");
 	}
 
 	/** True when the configured provider can do structured tool calls. */
@@ -214,17 +233,23 @@ public final class WorldForgeChatProtocol {
 	private static final class PushSink implements AgentOrchestrator.AgentEventSink {
 
 		private final ServerPlayerEntity player;
+		/** the client-side id of the request, echoed back so the client can
+		 *  drop the duplicate of the message it already shows */
+		private final String clientRequestId;
 
-		PushSink(ServerPlayerEntity player) {
+		PushSink(ServerPlayerEntity player, String clientRequestId) {
 			this.player = player;
+			this.clientRequestId = clientRequestId == null ? "" : clientRequestId;
 		}
 
 		@Override
-		public void onMessage(String conversationId, String role, String text) {
+		public void onMessage(String conversationId, String role, String text, String taskId) {
 			JsonObject o = new JsonObject();
 			o.addProperty("conversationId", conversationId);
 			o.addProperty("role", role);
 			o.addProperty("text", text);
+			o.addProperty("taskId", taskId == null ? "" : taskId);
+			o.addProperty("clientRequestId", clientRequestId);
 			push(player, 0, "message", o.toString());
 		}
 
@@ -234,8 +259,8 @@ public final class WorldForgeChatProtocol {
 		}
 
 		@Override
-		public void onStatus(String conversationId, String status, String detail) {
-			pushStatus(player, 0, conversationId, status, detail);
+		public void onStatus(String conversationId, String state, String detail, String taskId) {
+			pushStatus(player, 0, conversationId, state, detail, taskId);
 		}
 	}
 
@@ -252,16 +277,17 @@ public final class WorldForgeChatProtocol {
 	}
 
 	private static void pushStatus(ServerPlayerEntity player, int requestId, String conversationId,
-			String status, String detail) {
+			String status, String detail, String taskId) {
 		JsonObject o = new JsonObject();
 		o.addProperty("conversationId", conversationId == null ? "" : conversationId);
 		o.addProperty("status", status);
 		o.addProperty("detail", detail == null ? "" : detail);
+		o.addProperty("taskId", taskId == null ? "" : taskId);
 		push(player, requestId, "status", o.toString());
 	}
 
 	private static void pushError(ServerPlayerEntity player, int requestId, String message) {
-		pushStatus(player, requestId, "", "error", message);
+		pushStatus(player, requestId, "", AgentOrchestrator.TaskState.FAILED.name(), message, "");
 	}
 
 	// ---------------- helpers ----------------

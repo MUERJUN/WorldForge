@@ -97,8 +97,9 @@ public class ExportExecutor {
 		}
 		var proc = currentProcess.get();
 		if (proc != null && proc.isAlive()) {
-			proc.descendants().forEach(ProcessHandle::destroyForcibly);
-			proc.destroyForcibly();
+			// destroy NOW so the build stops as fast as possible; the build
+			// thread waits for the tree to be really gone before it cleans up
+			destroyProcessTree(proc);
 			audit("subprocess tree destroyed");
 		}
 	}
@@ -329,8 +330,12 @@ public class ExportExecutor {
 		}
 
 		if (cancelled.get()) {
-			proc.descendants().forEach(ProcessHandle::destroyForcibly);
-			proc.destroyForcibly();
+			// v0.7.1: destroyForcibly() is ASYNCHRONOUS. The cleanup that
+			// follows deletes the produced jars — but the dying Gradle process
+			// was still writing them, so a jar could appear AFTER the cleanup
+			// and survive a "cancelled" export. The process tree is therefore
+			// waited for, and only then is the workspace cleaned.
+			terminateProcessTree(proc);
 			audit("cancelled during build wait");
 			throw new BuildCancelledException();
 		}
@@ -367,13 +372,64 @@ public class ExportExecutor {
 	}
 
 	/** Delete any produced JARs so a failed/cancelled build leaves no misleading artifact. */
+	/**
+	 * Deletes the artifacts of a build that did not succeed.
+	 *
+	 * <p>v0.7.1: the Loom "dev" intermediates are removed as well — a file
+	 * that looks like a mod must not survive a failed or cancelled export.</p>
+	 */
 	private static void deleteProducedJars(Path projectDir) {
-		var jarDir = projectDir.resolve("build/libs");
-		if (!Files.exists(jarDir)) return;
-		try (var stream = Files.list(jarDir)) {
-			stream.filter(p -> p.toString().endsWith(".jar")).forEach(p -> {
+		for (String rel : new String[]{"build/libs", "build/devlibs"}) {
+			var jarDir = projectDir.resolve(rel);
+			if (!Files.exists(jarDir)) {
+				continue;
+			}
+			try (var stream = Files.list(jarDir)) {
+				stream.filter(p -> p.toString().endsWith(".jar")).forEach(p -> {
+					try {
+						Files.deleteIfExists(p);
+					} catch (Exception ignored) {
+					}
+				});
+			} catch (Exception ignored) {
+			}
+		}
+	}
+
+	/** Kills a process and its descendants without waiting for them. */
+	private static void destroyProcessTree(Process proc) {
+		try {
+			proc.descendants().forEach(ProcessHandle::destroyForcibly);
+		} catch (Exception ignored) {
+		}
+		try {
+			proc.destroyForcibly();
+		} catch (Exception ignored) {
+		}
+	}
+
+	/**
+	 * Kills a process AND its descendants, and waits until they are really
+	 * gone.
+	 *
+	 * <p>Waiting matters: {@code destroyForcibly()} only ASKS a process to
+	 * die. A Gradle build that is still dying can still write files, and the
+	 * cleanup that follows would then race with it.</p>
+	 */
+	private static void terminateProcessTree(Process proc) {
+		destroyProcessTree(proc);
+		try {
+			// the process itself
+			proc.waitFor(15, TimeUnit.SECONDS);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		} catch (Exception ignored) {
+		}
+		try {
+			// and its descendants (the Gradle daemon it may have started)
+			proc.descendants().forEach(h -> {
 				try {
-					Files.deleteIfExists(p);
+					h.onExit().get(10, TimeUnit.SECONDS);
 				} catch (Exception ignored) {
 				}
 			});

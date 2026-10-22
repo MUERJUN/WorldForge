@@ -57,6 +57,10 @@ public final class BlockMutationTools {
 			return ToolResult.fail("invalid_arguments", outcome.error());
 		}
 		BlockDefinition def = outcome.value();
+		if (!ctx.scope().mayWriteBlock(def.id())) {
+			return ToolResult.fail("out_of_scope",
+					"这个方块不在你确认的范围内：" + def.id());
+		}
 		var r = WorldForgeBlockTools.createBlock(ctx.server(), def);
 		JsonObject o = new JsonObject();
 		o.addProperty("id", def.id());
@@ -64,7 +68,7 @@ public final class BlockMutationTools {
 		o.addProperty("applied", r.applied());
 		o.addProperty("sync", r.sync().name());
 		if (!r.ok()) {
-			return ToolResult.degraded("persistence-failed",
+			return ToolResult.degraded(ItemMutationTools.failureCode(r.message()),
 					"创建方块失败（未写入）: " + r.message(), r.persisted(), r.applied());
 		}
 		return new ToolResult(true, "", "已创建方块 " + def.name() + "（" + def.id() + "）",
@@ -76,7 +80,9 @@ public final class BlockMutationTools {
 		if (id == null) {
 			return ToolPreparation.none();
 		}
-		return new ToolPreparation(List.of(), List.of(), "将创建新方块 " + id, "");
+		return ToolPreparation.of(List.of(), List.of(id), "将创建新方块 " + id, "",
+				ctx.world() == null ? "" : ctx.worldId(),
+				ctx.dimensionId() == null ? "" : ctx.dimensionId().toString());
 	};
 
 	// --------------------------------------------------------- update_block
@@ -117,6 +123,9 @@ public final class BlockMutationTools {
 		if (!outcome.ok()) {
 			return ToolResult.fail("invalid_arguments", outcome.error());
 		}
+		if (!ctx.scope().mayWriteBlock(id)) {
+			return ToolResult.fail("out_of_scope", "这个方块不在你确认的范围内：" + id);
+		}
 		var r = WorldForgeBlockTools.updateBlock(ctx.server(), outcome.value());
 		JsonObject o = new JsonObject();
 		o.addProperty("id", id);
@@ -124,7 +133,7 @@ public final class BlockMutationTools {
 		o.addProperty("applied", r.applied());
 		o.addProperty("sync", r.sync().name());
 		if (!r.ok()) {
-			return ToolResult.degraded("persistence-failed",
+			return ToolResult.degraded(ItemMutationTools.failureCode(r.message()),
 					"修改方块失败（未写入）: " + r.message(), r.persisted(), r.applied());
 		}
 		return new ToolResult(true, "", "已修改方块 " + id + "（已放置的方块立即使用新配置）",
@@ -143,7 +152,10 @@ public final class BlockMutationTools {
 		}
 		var count = PlacedBlockCounter.count(ctx, id);
 		String summary = "将修改方块 " + id + " 的共享定义。" + PlacedBlockCounter.impactStatement(count.count(), count.truncated());
-		return new ToolPreparation(List.of(), List.of(id), summary, ToolDefinitions.snapshotOf(current));
+		return ToolPreparation.of(List.of(), List.of(id), summary,
+				ToolDefinitions.snapshotOf(current),
+				ctx.world() == null ? "" : ctx.worldId(),
+				ctx.dimensionId() == null ? "" : ctx.dimensionId().toString());
 	};
 
 	// -------------------------------------------------- inspect_target_block
@@ -229,6 +241,9 @@ public final class BlockMutationTools {
 		if (!outcome.ok()) {
 			return ToolResult.fail("invalid_arguments", outcome.error());
 		}
+		if (!ctx.scope().mayWriteBlock(id)) {
+			return ToolResult.fail("out_of_scope", "这个方块不在你确认的范围内：" + id);
+		}
 		var r = WorldForgeBlockTools.updateBlock(ctx.server(), outcome.value());
 		JsonObject o = new JsonObject();
 		o.addProperty("id", id);
@@ -236,7 +251,7 @@ public final class BlockMutationTools {
 		o.addProperty("applied", r.applied());
 		o.addProperty("sync", r.sync().name());
 		if (!r.ok()) {
-			return ToolResult.degraded("persistence-failed",
+			return ToolResult.degraded(ItemMutationTools.failureCode(r.message()),
 					"修改方块失败（未写入）: " + r.message(), r.persisted(), r.applied());
 		}
 		return new ToolResult(true, "",
@@ -261,7 +276,10 @@ public final class BlockMutationTools {
 		var count = PlacedBlockCounter.count(ctx, id);
 		String summary = "将修改你正在看的方块 " + id + " 的共享定义。"
 				+ PlacedBlockCounter.impactStatement(count.count(), count.truncated());
-		return new ToolPreparation(List.of(), List.of(id), summary, ToolDefinitions.snapshotOf(current));
+		return ToolPreparation.of(List.of(), List.of(id), summary,
+				ToolDefinitions.snapshotOf(current),
+				ctx.world() == null ? "" : ctx.worldId(),
+				ctx.dimensionId() == null ? "" : ctx.dimensionId().toString());
 	};
 
 	private static java.util.Map<String, Object> withId(java.util.Map<String, Object> args, String id) {

@@ -68,12 +68,15 @@ public final class ExportModTool {
 		return ToolDescriptor.longRunningAdmin(NAME,
 				"把选定的物品和方块构建成一个独立的 Fabric Mod JAR。会真的运行 Gradle 构建，"
 						+ "过程中会在聊天里显示真实进度；完成后给出 JAR 名称和工作区中的相对位置。",
-				schema);
+				schema,
+				// the budget FOLLOWS the build: it must never be shorter than
+				// the Gradle build the tool actually waits for
+				dev.worldforge.ai.AgentTimeouts.EXPORT_TOOL_SECONDS);
 	}
 
 	public static final ToolExecutor EXECUTOR = (ctx, request, sink) -> {
-		List<String> itemIds = CheckExportCapabilitiesTool.stringList(request, "item_ids");
-		List<String> blockIds = CheckExportCapabilitiesTool.stringList(request, "block_ids");
+		List<String> itemIds = normalize(CheckExportCapabilitiesTool.stringList(request, "item_ids"));
+		List<String> blockIds = normalize(CheckExportCapabilitiesTool.stringList(request, "block_ids"));
 		if (itemIds.isEmpty() && blockIds.isEmpty()) {
 			return ToolResult.fail("invalid_arguments", "至少需要一个物品或方块 id");
 		}
@@ -86,16 +89,29 @@ public final class ExportModTool {
 		String rawVersion = ToolDefinitions.str(request, "version");
 		final String version = rawVersion == null ? "1.0.0" : rawVersion;
 
-		// --- resolve the definitions FIRST (cheap, and gives a clear error) ---
-		for (String id : itemIds) {
-			if (WorldForgeRuntimeManager.get(id) == null) {
-				return ToolResult.fail("not_found", "物品定义不存在: " + id);
+		// --- resolve the definitions FIRST, ON THE SERVER THREAD ---
+		//
+		// v0.7.1: this used to read BlockRuntimeManager from the worker
+		// thread. Its map is a plain LinkedHashMap that the server thread
+		// mutates, so an off-thread read can observe a half-updated state.
+		var missing = onServerThread(ctx, () -> {
+			for (String id : itemIds) {
+				if (WorldForgeRuntimeManager.get(id) == null) {
+					return "物品定义不存在: " + id;
+				}
 			}
+			for (String id : blockIds) {
+				if (BlockRuntimeManager.get(id) == null) {
+					return "方块定义不存在: " + id;
+				}
+			}
+			return "";
+		});
+		if (missing == null) {
+			return ToolResult.fail("server_error", "无法在服务端线程上校验定义");
 		}
-		for (String id : blockIds) {
-			if (BlockRuntimeManager.get(id) == null) {
-				return ToolResult.fail("not_found", "方块定义不存在: " + id);
-			}
+		if (!missing.isBlank()) {
+			return ToolResult.fail("not_found", missing);
 		}
 
 		// the exporter refuses to write into a directory that is not empty, so
@@ -159,6 +175,12 @@ public final class ExportModTool {
 
 		// --- run the build on THIS (worker) thread, never the server thread ---
 		ExportExecutor executor = new ExportExecutor(exportPlan);
+		// v0.7.1: a cancellation really stops the build — the Gradle process
+		// AND its process tree are destroyed, and the produced JARs are
+		// cleaned up by the exporter itself.
+		if (ctx.task() != null) {
+			ctx.task().onCancel(executor::cancel);
+		}
 		Thread progress = startProgressReporter(executor, sink, request);
 		ModExporter.ExportResult result;
 		try {
@@ -174,6 +196,27 @@ public final class ExportModTool {
 		o.addProperty("mod_id", plan.modId());
 		o.addProperty("mod_name", plan.modName());
 		o.addProperty("version", plan.version());
+		boolean cancelled = ctx.task() != null && ctx.task().isCancelled();
+		if (cancelled) {
+			// the build was cancelled. If it had ALREADY finished before the
+			// cancellation arrived, that must be said honestly: an artifact
+			// that exists cannot be un-made.
+			if (result.ok()) {
+				// the build was already finished when the cancellation arrived:
+				// the artifact EXISTS and cannot be un-made. Say so honestly —
+				// it is not a failure, and it is not a cancellation either.
+				o.addProperty("jar_name", result.jarPath() == null ? ""
+						: result.jarPath().getFileName().toString());
+				o.addProperty("jar_path", result.jarPath() == null ? "" : result.jarPath().toString());
+				o.addProperty("sha256", result.sha256() == null ? "" : result.sha256());
+				o.addProperty("already_completed", true);
+				return new ToolResult(true, "", "导出在取消到达之前已经完成，产物已保留："
+						+ (result.jarPath() == null ? "" : result.jarPath()),
+						o.toString(), List.of(), true, true, "none");
+			}
+			o.addProperty("error", result.errorMessage() == null ? "已取消" : result.errorMessage());
+			return ToolResult.cancelled("导出已取消，构建进程已终止，产物已清理。", o.toString());
+		}
 		if (result.ok()) {
 			Path jar = result.jarPath();
 			o.addProperty("jar_name", jar == null ? "" : jar.getFileName().toString());
@@ -238,7 +281,9 @@ public final class ExportModTool {
 		if (!report.converted().isEmpty()) {
 			sb.append("另有 ").append(report.converted().size()).append(" 项会以等价但不同的方式实现。");
 		}
-		return new ToolPreparation(itemIds, blockIds, sb.toString(), "");
+		return ToolPreparation.of(itemIds, blockIds, sb.toString(), "",
+				ctx.world() == null ? "" : ctx.worldId(),
+				ctx.dimensionId() == null ? "" : ctx.dimensionId().toString());
 	};
 
 	/**
@@ -281,6 +326,47 @@ public final class ExportModTool {
 		t.setDaemon(true);
 		t.start();
 		return t;
+	}
+
+	/** Normalises the ids the way every other tool does. */
+	private static List<String> normalize(List<String> ids) {
+		List<String> out = new java.util.ArrayList<>();
+		for (String id : ids) {
+			String n = dev.worldforge.tool.WorldForgeTools.normalizeId(id);
+			if (n != null && !n.isBlank()) {
+				out.add(n);
+			}
+		}
+		return out;
+	}
+
+	/** Runs a piece of work on the server thread and waits for its result. */
+	private static <T> T onServerThread(dev.worldforge.ops.ToolContext ctx,
+			java.util.function.Supplier<T> work) {
+		if (ctx.server() == null) {
+			return work.get();
+		}
+		var ref = new java.util.concurrent.atomic.AtomicReference<T>();
+		var err = new java.util.concurrent.atomic.AtomicReference<Exception>();
+		var latch = new java.util.concurrent.CountDownLatch(1);
+		ctx.server().execute(() -> {
+			try {
+				ref.set(work.get());
+			} catch (Exception e) {
+				err.set(e);
+			} finally {
+				latch.countDown();
+			}
+		});
+		try {
+			if (!latch.await(60, java.util.concurrent.TimeUnit.SECONDS)) {
+				return null;
+			}
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			return null;
+		}
+		return err.get() == null ? ref.get() : null;
 	}
 
 	/**
