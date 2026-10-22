@@ -64,6 +64,11 @@
 
 **C：聊天内导出独立 Mod** — 「把刚才的雷霆剑导出成一个独立 Mod」→ AI 调能力分析 → 显示保留/转换/丢失 → 有降级时明确确认 → 调用既有 ExportExecutor → 聊天里展示真实构建进度 → 成功后给出 JAR 名称与工作区相对路径。
 
+> 验收分两段（原因见 [`docs/ACCEPTANCE-v0.7.0.md`](docs/ACCEPTANCE-v0.7.0.md)）：
+> GameTest 验证到**真实 Gradle 构建已被启动**、工作区里出现真实的导出工程；**JAR 本身**
+> 由导出器集成测试（JUnit）、客户端聊天导出验收（`runClientChatExportTest`）与
+> Linux CI 的三工程真实构建共同证明。
+
 ### 修复
 
 - **v0.6.0 的 P0 仍然有效**：无效 Journal 不再是空检查；首次保存失败不再留下半成品目标。

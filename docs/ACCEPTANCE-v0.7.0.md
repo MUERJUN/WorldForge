@@ -60,11 +60,25 @@ $env:GRADLE_USER_HOME = "E:\javas\gradle-cache"   # 避免占满系统盘
 |----------|------|----------|
 | `WorldForgeChatFlowTests.flowA_heldWeaponGainsBehaviourAndReallyWorks` | A | 手持虚拟武器 → 聊天 → 确认 → **定义真的变了** → 右键**真的**产生效果 |
 | `WorldForgeChatFlowTests.flowB_targetedBlockChangesAndReallyWorks` | B | 视线目标动态方块 → 聊天 → 确认（**摘要说明共享定义影响**）→ **定义真的变了** → 右键**真的**有反应 → **存档重载后仍在** |
-| `WorldForgeChatExportTests.flowC_chatExportProducesARealJar` | C | 聊天请求导出 → 能力报告 → **降级确认（摘要列出损失项）** → **真实 Gradle 构建** → 磁盘上出现**真实可读的 Fabric JAR** |
+| `WorldForgeChatExportTests.flowC_chatExportProducesARealJar` | C（第一段） | 聊天请求导出 → 能力报告 → **降级确认（摘要列出损失项）** → **真实启动 Gradle 构建** → 工作区里出现**真实的导出工程**（`build.gradle` / `gradlew` / `src`） |
 
-> 流程 C 会真的跑一次 Gradle 构建，**需要 1–3 分钟**，并要求首次构建时能联网下载
-> Gradle 发行版与 Fabric 依赖（约 100–200 MB）。产物在
-> `run/worldforge/exports/<modId>/<modId>/build/libs/`。
+> **为什么 flow C 分两段。** GameTest 的 tick 预算从**入队**那一刻开始算，一个长等待在
+> 测试真正开始时可能已经"过期"（会立刻触发，断言就跑到构建前面去了）。所以 GameTest
+> 只验证到**真实构建已被启动**这一步，然后主动取消构建。**JAR 本身**由另外两处证明，
+> 它们都没有 tick 预算：
+>
+> | 证据 | 命令 | 证明什么 |
+> |------|------|----------|
+> | 导出器集成测试 | `./gradlew test --tests "dev.worldforge.ExportBuildIntegrationTest"` | 同一个 ExportExecutor 真的构建出**可加载的 Fabric JAR** |
+> | 客户端聊天导出验收 | `./gradlew runClientChatExportTest` | 从**真实客户端的聊天**里发起导出，磁盘上出现**真实 JAR**（`run/wf-chat-export-report.txt`） |
+> | Linux CI | `.github/workflows/linux-export-build.yml` | 三个导出工程在**空白 Gradle home**下真实构建并跑通它们的 Fabric GameTest |
+
+> 流程 C 会真的**启动**一次 Gradle 构建（产物工程在
+> `run/worldforge/exports/<slot>/<modId>/`），测试随后取消构建。
+> 首次构建时能联网下载 Gradle 发行版与 Fabric 依赖（约 100–200 MB）。
+>
+> 想看**完整的**聊天导出闭环（真的产出 JAR），跑客户端验收：
+> `./gradlew runClientChatExportTest`——客户端没有 tick 预算，可以一直等构建结束。
 
 ---
 
