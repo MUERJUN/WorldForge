@@ -154,7 +154,12 @@ public final class GraftBehaviorTool {
 				+ triggerLabel(behavior.trigger()) + "·" + actionLabel(behavior)
 				+ "（冷却 " + (behavior.cooldownTicks() / 20.0) + " 秒）。"
 				+ "物品本身（模型、耐久、附魔）完全不变，随时可以撤销。";
-		return ToolPreparation.of(List.of(), List.of(), summary, "",
+		// the snapshot captures the item stack identity so that a player who
+		// swaps items between confirmation and execution is caught by the
+		// orchestrator's snapshot comparison (AgentOrchestrator re-runs this
+		// preparer at execution time and compares)
+		String snapshot = stackSnapshot(stack);
+		return ToolPreparation.of(List.of(), List.of(), summary, snapshot,
 				ctx.world() == null ? "" : ctx.worldId(),
 				ctx.dimensionId() == null ? "" : ctx.dimensionId().toString());
 	};
@@ -205,12 +210,29 @@ public final class GraftBehaviorTool {
 		int count = BehaviorEngine.graftBehaviors(stack).size();
 		String summary = "将撤销手中「" + stack.getName().getString() + "」上的 " + count
 				+ " 个附加行为，物品恢复原样。";
-		return ToolPreparation.of(List.of(), List.of(), summary, "",
+		String snapshot = stackSnapshot(stack);
+		return ToolPreparation.of(List.of(), List.of(), summary, snapshot,
 				ctx.world() == null ? "" : ctx.worldId(),
 				ctx.dimensionId() == null ? "" : ctx.dimensionId().toString());
 	};
 
 	// ------------------------------------------------------------- labels
+
+	/**
+	 * Captures the identity of a held stack for the confirmation snapshot.
+	 *
+	 * <p>The orchestrator re-runs the preparer at execution time and compares
+	 * this string, so a player who swaps to a different item between
+	 * confirmation and execution is caught.</p>
+	 *
+	 * <p>The format is {@code item_id:count}. Two stacks with the same id and
+	 * count are treated as the same target; a different id or a different
+	 * count both fail the comparison.</p>
+	 */
+	private static String stackSnapshot(ItemStack stack) {
+		String id = Registries.ITEM.getId(stack.getItem()).toString();
+		return id + ":" + stack.getCount();
+	}
 
 	private static String triggerLabel(String trigger) {
 		return "right_click".equals(trigger) ? "右键" : "命中";

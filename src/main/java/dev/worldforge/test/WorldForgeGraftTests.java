@@ -233,6 +233,72 @@ public class WorldForgeGraftTests {
 		});
 	}
 
+	/**
+	 * The confirmation target must not change: if the player swaps to a
+	 * different item between the confirmation and the execution, the graft
+	 * must be refused.
+	 *
+	 * <p>The snapshot captures the held stack's id and count at preparation
+	 * time; the orchestrator re-runs the preparer at execution time and
+	 * compares. A swap changes the id, so the comparison fails and the
+	 * tool is refused with {@code target_changed}.</p>
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-3",
+			tickLimit = 60_000)
+	public void swappingTheHeldItemAfterConfirmingRefusesTheGraft(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-graft-3");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+		player.getInventory().setStack(player.getInventory().selectedSlot, new ItemStack(Items.DIAMOND_SWORD));
+
+		var provider = MockToolProvider.responding(userMessage ->
+				new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1", "graft_behavior",
+						"{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
+								+ "\"cooldown_ticks\":40,\"parameters\":"
+								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}"))));
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "graft-swap";
+		AgentOrchestrator.send(server, player, conversationId, "给我手里的剑加上加速", null, recorder);
+
+		await(ctx, 30_000, () -> confirmationCount(recorder) > 0, () -> {
+			var pending = pendingOf(recorder);
+			ctx.assertTrue(pending != null, "the graft must ask for a confirmation");
+
+			// the player swaps to a DIFFERENT item while the confirmation is
+			// pending
+			player.getInventory().setStack(player.getInventory().selectedSlot, new ItemStack(Items.DIAMOND_PICKAXE));
+			ctx.assertTrue(player.getMainHandStack().getItem() == Items.DIAMOND_PICKAXE,
+					"the player must now hold a different item");
+
+			// ... and confirms
+			ctx.assertTrue(AgentOrchestrator.confirm(player.getUuid(), conversationId,
+					pending.confirmationId()), "the confirmation must be accepted");
+
+			// the graft must be REFUSED because the target changed
+			await(ctx, 30_000, () -> finished(recorder, "graft_behavior") != null, () -> {
+				var done = finished(recorder, "graft_behavior");
+				ctx.assertTrue(done != null, "the graft must report a final state");
+				ctx.assertEquals(ToolEventStatus.FAILED, done.status(),
+						"the graft must fail when the target changed: " + done.summary());
+				ctx.assertTrue(done.summary().contains("target_changed") || done.summary().contains("变化"),
+						"the failure must name the target change: " + done.summary());
+
+				// and the item must be untouched
+				ctx.assertFalse(player.getMainHandStack().getComponents().contains(WorldForgeComponents.BEHAVIOR_GRAFT),
+						"the graft must NOT be applied to the swapped item");
+
+				AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+				ctx.complete();
+			});
+		});
+	}
+
 	// ------------------------------------------------------------- helpers
 
 	private static void await(TestContext ctx, long budgetMillis, java.util.function.BooleanSupplier ready,

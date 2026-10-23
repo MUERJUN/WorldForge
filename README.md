@@ -7,7 +7,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 - 游戏版本：Minecraft Java **1.21.1**
 - 加载器：Fabric Loader **0.16.9** + Fabric API **0.116.5+1.21.1**
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**
-- 当前版本：**v0.7.1 Public Beta Maintenance**
+- 当前版本：**v0.7.2 Public Beta**
 
 ---
 
@@ -24,7 +24,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 然后直接用大白话说：
 
 - 「创建一把雷霆之剑，右键召唤闪电，冷却 5 秒」
-- 「让它右键召唤加速」
+- 「给我手里的剑加上加速」 ← **v0.7.2 新增：原版物品也能获得行为**
 - 「把刚才的剑导出成一个独立 Mod」
 
 AI 自己判断该做什么、在游戏里执行，并把**真实发生的每一步**显示在同一条对话里。
