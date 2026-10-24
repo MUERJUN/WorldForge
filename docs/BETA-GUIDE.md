@@ -1,4 +1,4 @@
-# WorldForge 公测指南（v0.7.2）
+# WorldForge 公测指南（v0.7.3）
 
 > 一个 JAR 装进游戏，在 Minecraft 里创建、测试、导出真正可用的独立 Mod。
 
@@ -19,7 +19,7 @@
 1. 安装 [Fabric Loader](https://fabricmc.net/use/installer/)，选择 1.21.1。
 2. 把两个 JAR 放进 `.minecraft/mods/`：
    - `fabric-api-0.116.5+1.21.1.jar`
-   - `worldforge-0.7.1.jar`
+   - `worldforge-0.7.3.jar`
 3. 启动游戏。进世界后按 **K** 打开 **AI 聊天**。
 4. 第一次用先点聊天右上角 **⚙ 设置**，填服务商（DeepSeek / OpenAI 兼容）、URL、模型名、API Key
    → 「测试连接」确认通了 → 「保存」。单人游戏直接生效，不用重启。

@@ -301,6 +301,275 @@ public class WorldForgeGraftTests {
 
 	// ------------------------------------------------------------- helpers
 
+	/**
+	 * P0-2: the fingerprint must distinguish items with the same id and
+	 * count but different durability. Two diamond swords with different
+	 * damage levels are different targets.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p0-2",
+			tickLimit = 60_000)
+	public void swappingToSameItemTypeWithDifferentDurabilityRefusesTheGraft(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-graft-p0-2-dur");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		// player holds a fresh diamond sword
+		player.getInventory().setStack(player.getInventory().selectedSlot, new ItemStack(Items.DIAMOND_SWORD));
+
+		var provider = MockToolProvider.responding(userMessage ->
+				new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1", "graft_behavior",
+						"{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
+								+ "\"cooldown_ticks\":40,\"parameters\":"
+								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}"))));
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "graft-dur-swap";
+		AgentOrchestrator.send(server, player, conversationId, "给我手里的剑加上加速", null, recorder);
+
+		await(ctx, 30_000, () -> confirmationCount(recorder) > 0, () -> {
+			var pending = pendingOf(recorder);
+			ctx.assertTrue(pending != null, "the graft must ask for a confirmation");
+
+			// player swaps to a DAMAGED diamond sword (same id, same count, different durability)
+			var damagedSword = new ItemStack(Items.DIAMOND_SWORD);
+			damagedSword.set(net.minecraft.component.DataComponentTypes.DAMAGE, 10);
+			player.getInventory().setStack(player.getInventory().selectedSlot, damagedSword);
+			ctx.assertTrue(player.getMainHandStack().getItem() == Items.DIAMOND_SWORD,
+					"the player must still hold a diamond sword");
+
+			ctx.assertTrue(AgentOrchestrator.confirm(player.getUuid(), conversationId,
+					pending.confirmationId()), "the confirmation must be accepted");
+
+			await(ctx, 30_000, () -> finished(recorder, "graft_behavior") != null, () -> {
+				var done = finished(recorder, "graft_behavior");
+				ctx.assertTrue(done != null, "the graft must report a final state");
+				ctx.assertEquals(ToolEventStatus.FAILED, done.status(),
+						"the graft must fail when durability changed: " + done.summary());
+				ctx.assertFalse(player.getMainHandStack().getComponents().contains(WorldForgeComponents.BEHAVIOR_GRAFT),
+						"the graft must NOT be applied to the swapped item");
+
+				AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+				ctx.complete();
+			});
+		});
+	}
+
+	/**
+	 * P0-2: the fingerprint must distinguish items with the same id and
+	 * count but different custom names.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p0-2-name",
+			tickLimit = 60_000)
+	public void swappingToSameItemTypeWithDifferentNameRefusesTheGraft(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-graft-p0-2-name");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		// player holds a diamond sword with a custom name
+		var namedSword = new ItemStack(Items.DIAMOND_SWORD);
+		namedSword.set(net.minecraft.component.DataComponentTypes.CUSTOM_NAME,
+				net.minecraft.text.Text.literal("我的剑"));
+		player.getInventory().setStack(player.getInventory().selectedSlot, namedSword);
+
+		var provider = MockToolProvider.responding(userMessage ->
+				new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1", "graft_behavior",
+						"{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
+								+ "\"cooldown_ticks\":40,\"parameters\":"
+								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}"))));
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "graft-name-swap";
+		AgentOrchestrator.send(server, player, conversationId, "给我手里的剑加上加速", null, recorder);
+
+		await(ctx, 30_000, () -> confirmationCount(recorder) > 0, () -> {
+			var pending = pendingOf(recorder);
+			ctx.assertTrue(pending != null, "the graft must ask for a confirmation");
+
+			// player swaps to an UNNAMED diamond sword
+			var plainSword = new ItemStack(Items.DIAMOND_SWORD);
+			player.getInventory().setStack(player.getInventory().selectedSlot, plainSword);
+
+			ctx.assertTrue(AgentOrchestrator.confirm(player.getUuid(), conversationId,
+					pending.confirmationId()), "the confirmation must be accepted");
+
+			await(ctx, 30_000, () -> finished(recorder, "graft_behavior") != null, () -> {
+				var done = finished(recorder, "graft_behavior");
+				ctx.assertTrue(done != null, "the graft must report a final state");
+				ctx.assertEquals(ToolEventStatus.FAILED, done.status(),
+						"the graft must fail when the name changed: " + done.summary());
+				ctx.assertFalse(player.getMainHandStack().getComponents().contains(WorldForgeComponents.BEHAVIOR_GRAFT),
+						"the graft must NOT be applied to the swapped item");
+
+				AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+				ctx.complete();
+			});
+		});
+	}
+
+	/**
+	 * P0-2: ungraft must also verify the target fingerprint. If the player
+	 * swaps items between confirmation and execution, the ungraft must be
+	 * refused.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p0-2-ungraft",
+			tickLimit = 60_000)
+	public void swappingAfterConfirmingUngraftRefusesTheUndo(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-graft-p0-2-ungraft");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		// player holds a grafted sword
+		var sword = new ItemStack(Items.DIAMOND_SWORD);
+		sword.set(WorldForgeComponents.BEHAVIOR_GRAFT,
+				new dev.worldforge.component.BehaviorGraft(List.of(
+						new dev.worldforge.definition.BehaviorDefinition(
+								"right_click", List.of("summon_lightning"),
+								java.util.Map.of(), 40))));
+		player.getInventory().setStack(player.getInventory().selectedSlot, sword);
+
+		// the model asks for ungraft
+		var provider = MockToolProvider.responding(userMessage ->
+				new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1", "ungraft_behavior", "{}"))));
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "ungraft-swap";
+		AgentOrchestrator.send(server, player, conversationId, "撤销它", null, recorder);
+
+		await(ctx, 30_000, () -> confirmationCount(recorder) > 0, () -> {
+			var pending = pendingOf(recorder);
+			ctx.assertTrue(pending != null, "the ungraft must ask for a confirmation");
+
+			// player swaps to a DIFFERENT grafted sword (different durability)
+			var otherSword = new ItemStack(Items.DIAMOND_SWORD);
+			otherSword.set(net.minecraft.component.DataComponentTypes.DAMAGE, 5);
+			otherSword.set(WorldForgeComponents.BEHAVIOR_GRAFT,
+					new dev.worldforge.component.BehaviorGraft(List.of(
+							new dev.worldforge.definition.BehaviorDefinition(
+									"right_click", List.of("summon_lightning"),
+									java.util.Map.of(), 40))));
+			player.getInventory().setStack(player.getInventory().selectedSlot, otherSword);
+
+			ctx.assertTrue(AgentOrchestrator.confirm(player.getUuid(), conversationId,
+					pending.confirmationId()), "the confirmation must be accepted");
+
+			await(ctx, 30_000, () -> finished(recorder, "ungraft_behavior") != null, () -> {
+				var done = finished(recorder, "ungraft_behavior");
+				ctx.assertTrue(done != null, "the ungraft must report a final state");
+				ctx.assertEquals(ToolEventStatus.FAILED, done.status(),
+						"the ungraft must fail when the target changed: " + done.summary());
+				// the new sword must STILL have its graft (not removed)
+				ctx.assertTrue(player.getMainHandStack().getComponents().contains(WorldForgeComponents.BEHAVIOR_GRAFT),
+						"the ungraft must NOT remove the graft from the swapped item");
+
+				AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+				ctx.complete();
+			});
+		});
+	}
+
+	/**
+	 * P1: the server-side behaviour policy must block dangerous actions at
+	 * EXECUTION time, even when the behaviour was grafted successfully.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p1-policy",
+			tickLimit = 60_000)
+	public void dangerousBehaviourIsBlockedByServerPolicyAtExecutionTime(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-graft-p1-policy");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		// the player holds a grafted sword with explosion behaviour
+		var sword = new ItemStack(Items.DIAMOND_SWORD);
+		sword.set(WorldForgeComponents.BEHAVIOR_GRAFT,
+				new dev.worldforge.component.BehaviorGraft(List.of(
+						new dev.worldforge.definition.BehaviorDefinition(
+								"right_click", List.of("explosion"),
+								java.util.Map.of("power", 1.5), 40))));
+		player.getInventory().setStack(player.getInventory().selectedSlot, sword);
+
+		// the default policy blocks explosion
+		dev.worldforge.behavior.BehaviorPolicy.set(dev.worldforge.behavior.BehaviorPolicy.DEFAULT);
+
+		// right-click the grafted sword
+		UseItemCallback.EVENT.invoker().interact(player, ctx.getWorld(), Hand.MAIN_HAND);
+
+		// the explosion must NOT have fired — the policy blocked it
+		ctx.assertTrue(player.getHealth() == player.getMaxHealth(),
+				"the player must not be damaged by the blocked explosion");
+		var state = player.getMainHandStack().get(WorldForgeComponents.BEHAVIOR_STATE);
+		ctx.assertTrue(state == null || state.cooldownUntilGameTime() == 0,
+				"the cooldown must NOT be set when the action is blocked by policy");
+
+		// now the server allows explosion
+		dev.worldforge.behavior.BehaviorPolicy.set(
+				dev.worldforge.behavior.BehaviorPolicy.of(
+						java.util.Set.of("explosion"), java.util.Set.of()));
+
+		// right-click again — now the explosion fires
+		UseItemCallback.EVENT.invoker().interact(player, ctx.getWorld(), Hand.MAIN_HAND);
+
+		var stateAfter = player.getMainHandStack().get(WorldForgeComponents.BEHAVIOR_STATE);
+		ctx.assertTrue(stateAfter != null,
+				"the cooldown must be set when the action fires after the policy change");
+		ctx.assertTrue(stateAfter.cooldownUntilGameTime() > 0,
+				"the cooldown must be positive when the action fires");
+
+		dev.worldforge.behavior.BehaviorPolicy.set(null);
+		ctx.complete();
+	}
+
+	/**
+	 * P1: safe behaviours must work even without any server config.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p1-safe",
+			tickLimit = 60_000)
+	public void safeBehaviourWorksWithoutServerConfig(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-graft-p1-safe");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		var sword = new ItemStack(Items.DIAMOND_SWORD);
+		sword.set(WorldForgeComponents.BEHAVIOR_GRAFT,
+				new dev.worldforge.component.BehaviorGraft(List.of(
+						new dev.worldforge.definition.BehaviorDefinition(
+								"right_click", List.of("heal"),
+								java.util.Map.of("amount", 4.0), 40))));
+		player.getInventory().setStack(player.getInventory().selectedSlot, sword);
+
+		dev.worldforge.behavior.BehaviorPolicy.set(dev.worldforge.behavior.BehaviorPolicy.DEFAULT);
+		UseItemCallback.EVENT.invoker().interact(player, ctx.getWorld(), Hand.MAIN_HAND);
+
+		var healState = player.getMainHandStack().get(WorldForgeComponents.BEHAVIOR_STATE);
+		ctx.assertTrue(healState != null && healState.cooldownUntilGameTime() > 0,
+				"the heal must fire and set a cooldown under the default policy");
+
+		dev.worldforge.behavior.BehaviorPolicy.set(null);
+		ctx.complete();
+	}
+
 	private static void await(TestContext ctx, long budgetMillis, java.util.function.BooleanSupplier ready,
 			Runnable then) {
 		if (ready.getAsBoolean()) {

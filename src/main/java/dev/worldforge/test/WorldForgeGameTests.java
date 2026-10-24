@@ -397,6 +397,12 @@ public class WorldForgeGameTests {
 	public void testR4_skillEffectsReallyApply(TestContext ctx) {
 		WorldForgeRuntimeManager.attachStoreForTesting(null);
 
+		// v0.7.3: the default policy blocks summon_lightning; this test
+		// verifies that the lightning behaviour really works, so allow it.
+		dev.worldforge.behavior.BehaviorPolicy.set(
+				dev.worldforge.behavior.BehaviorPolicy.of(
+						java.util.Set.of("summon_lightning"), java.util.Set.of()));
+
 		ItemDefinition healDef = new ItemDefinition(ItemDefinition.CURRENT_VERSION,
 				"worldforge:r4_heal", "R4治疗", "", TextureSource.vanilla("minecraft:item/blaze_rod"),
 				Map.of("max_durability", 10.0),
@@ -482,6 +488,8 @@ public class WorldForgeGameTests {
 			}
 			throw e;
 		}
+		// reset the policy to defaults so other tests are not affected
+		dev.worldforge.behavior.BehaviorPolicy.set(null);
 	}
 
 	// ---- Test R5 (issue #2/#5): payload codec round-trip + mirror-only display path ----

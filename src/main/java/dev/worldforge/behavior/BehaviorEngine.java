@@ -158,6 +158,18 @@ public final class BehaviorEngine {
 
 	private static boolean runAction(String action, BehaviorDefinition b, ServerWorld world,
 			PlayerEntity player, ItemStack stack, LivingEntity target) {
+		// v0.7.3: server-side policy check at EXECUTION time.
+		// Even if a behaviour was grafted when the server allowed it, a
+		// later policy change takes effect on the next fire.
+		if (!BehaviorPolicy.get().canExecute(action, b)) {
+			if (player instanceof ServerPlayerEntity sp) {
+				sp.sendMessage(Text.literal(
+						"§c[WorldForge] 行为被服务器策略禁止: " + action), true);
+			}
+			WorldForge.LOGGER.warn("[WorldForge] blocked action '{}' for player '{}' by server policy",
+					action, player.getName().getString());
+			return false;
+		}
 		switch (action) {
 			case "summon_lightning" -> {
 				Vec3d pos = player.getEyePos();

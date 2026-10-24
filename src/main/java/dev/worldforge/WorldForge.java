@@ -59,6 +59,10 @@ public class WorldForge implements ModInitializer {
 		dev.worldforge.ops.ToolCatalog.registerAll();
 		// v0.7.2: the hook that lets a VANILLA item carry a grafted behaviour
 		dev.worldforge.behavior.VanillaBehaviorHooks.register();
+		// v0.7.3: server-side behaviour execution policy
+		var policy = dev.worldforge.behavior.BehaviorPolicy.load(
+				net.fabricmc.loader.api.FabricLoader.getInstance().getGameDir());
+		dev.worldforge.behavior.BehaviorPolicy.set(policy);
 		WorldForgeEvents.register();
 		WorldForgeCommand.register();
 

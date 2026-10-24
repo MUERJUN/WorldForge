@@ -225,13 +225,42 @@ public final class GraftBehaviorTool {
 	 * this string, so a player who swaps to a different item between
 	 * confirmation and execution is caught.</p>
 	 *
-	 * <p>The format is {@code item_id:count}. Two stacks with the same id and
-	 * count are treated as the same target; a different id or a different
-	 * count both fail the comparison.</p>
+	 * <p>The fingerprint includes the item id, count, and a sorted
+	 * serialization of ALL data components (enchantments, durability, name,
+	 * lore, etc.) except the ones the graft itself creates
+	 * ({@link WorldForgeComponents#BEHAVIOR_GRAFT} and
+	 * {@link WorldForgeComponents#BEHAVIOR_STATE}). This means two swords
+	 * with the same id and count but different enchantments or durability
+	 * produce different fingerprints.</p>
+	 *
+	 * <p><b>Known limitation</b>: two items that are truly identical in every
+	 * component (same id, count, enchantments, durability, name, lore, etc.)
+	 * produce the same fingerprint. This cannot be avoided without modifying
+	 * the player's item to add a unique identifier, which we do not do. In
+	 * that edge case the behaviour would be identical regardless, so the
+	 * graft is safe.</p>
 	 */
 	private static String stackSnapshot(ItemStack stack) {
 		String id = Registries.ITEM.getId(stack.getItem()).toString();
-		return id + ":" + stack.getCount();
+		StringBuilder sb = new StringBuilder(id);
+		sb.append(':').append(stack.getCount());
+		List<String> parts = new ArrayList<>();
+		var components = stack.getComponents();
+		for (var type : components.getTypes()) {
+			// exclude components the graft itself creates or modifies
+			if (type == WorldForgeComponents.BEHAVIOR_GRAFT
+					|| type == WorldForgeComponents.BEHAVIOR_STATE) {
+				continue;
+			}
+			String key = type.toString();
+			Object value = components.get(type);
+			parts.add(key + "=" + (value == null ? "null" : value.toString()));
+		}
+		java.util.Collections.sort(parts);
+		for (String part : parts) {
+			sb.append('|').append(part);
+		}
+		return sb.toString();
 	}
 
 	private static String triggerLabel(String trigger) {
