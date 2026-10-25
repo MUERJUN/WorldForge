@@ -210,9 +210,20 @@ public class WorldForgeGraftTests {
 		Set<net.minecraft.component.ComponentType<?>> before = player.getMainHandStack().getComponents().getTypes();
 
 		// the model asks for an action that does not exist
-		var provider = MockToolProvider.responding(userMessage ->
-				new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1", "graft_behavior",
-						"{\"action\":\"launch_missiles\"}"))));
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
+						"ungraft_behavior", "{}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"graft_behavior", "{\"action\":\"launch_missiles\"}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
 		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
 
 		var recorder = new AgentEventRecorder();
@@ -255,11 +266,22 @@ public class WorldForgeGraftTests {
 				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
 		player.getInventory().setStack(player.getInventory().selectedSlot, new ItemStack(Items.DIAMOND_SWORD));
 
-		var provider = MockToolProvider.responding(userMessage ->
-				new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1", "graft_behavior",
-						"{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
+						"ungraft_behavior", "{}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
 								+ "\"cooldown_ticks\":40,\"parameters\":"
-								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}"))));
+								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
 		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
 
 		var recorder = new AgentEventRecorder();
@@ -299,6 +321,599 @@ public class WorldForgeGraftTests {
 		});
 	}
 
+	// ------------------------------------------------- P0 target binding (v0.7.4)
+
+	/**
+	 * P0: a change to an EXISTING graft during the confirmation window must
+	 * refuse the new graft. The old snapshot excluded the graft component, so
+	 * this change was invisible; the v0.7.4 fingerprint includes it.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p0-id",
+			tickLimit = 60_000)
+	public void existingGraftChangeDuringConfirmationRefusesTheGraft(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-p0-graftchg");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		// the player holds a sword that ALREADY carries a graft
+		var sword = new ItemStack(Items.DIAMOND_SWORD);
+		sword.set(WorldForgeComponents.BEHAVIOR_GRAFT, new dev.worldforge.component.BehaviorGraft(List.of(
+				new dev.worldforge.definition.BehaviorDefinition(
+						"right_click", List.of("heal"), java.util.Map.of("amount", 2.0), 40))));
+		player.getInventory().setStack(player.getInventory().selectedSlot, sword);
+
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
+						"ungraft_behavior", "{}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
+								+ "\"cooldown_ticks\":40,\"parameters\":"
+								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "p0-graftchg";
+		AgentOrchestrator.send(server, player, conversationId, "\u518d\u7ed9\u6211\u624b\u91cc\u7684\u5251\u52a0\u4e2a\u52a0\u901f", null, recorder);
+
+		await(ctx, 30_000, () -> confirmationCount(recorder) > 0, () -> {
+			var pending = pendingOf(recorder);
+			ctx.assertTrue(pending != null, "the graft must ask for a confirmation");
+
+			// while the confirmation is pending, the EXISTING graft is
+			// modified (another behaviour added to the same stack)
+			ItemStack held = player.getMainHandStack();
+			List<dev.worldforge.definition.BehaviorDefinition> modified =
+					new java.util.ArrayList<>(dev.worldforge.behavior.BehaviorEngine.graftBehaviors(held));
+			modified.add(new dev.worldforge.definition.BehaviorDefinition(
+					"hit_entity", List.of("ignite"), java.util.Map.of("seconds", 3), 40));
+			held.set(WorldForgeComponents.BEHAVIOR_GRAFT,
+					new dev.worldforge.component.BehaviorGraft(modified));
+
+			ctx.assertTrue(AgentOrchestrator.confirm(player.getUuid(), conversationId,
+					pending.confirmationId()), "the confirmation must be accepted");
+
+			await(ctx, 30_000, () -> finished(recorder, "graft_behavior") != null, () -> {
+				var done = finished(recorder, "graft_behavior");
+				ctx.assertTrue(done != null, "the graft must report a final state");
+				ctx.assertEquals(ToolEventStatus.FAILED, done.status(),
+						"the graft must fail when the existing graft changed: " + done.summary());
+				int size = dev.worldforge.behavior.BehaviorEngine.graftBehaviors(
+						player.getMainHandStack()).size();
+				ctx.assertEquals(2, size,
+						"the modified graft must be untouched by the refused operation");
+				AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+				ctx.complete();
+			});
+		});
+	}
+
+	/**
+	 * P0: two vanilla items whose normal components are IDENTICAL but whose
+	 * graft state differs are different targets.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p0-id",
+			tickLimit = 60_000)
+	public void sameNormalComponentsButDifferentGraftStateRefusesTheGraft(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-p0-graftstate");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		// player holds an UNGRAFTED sword
+		player.getInventory().setStack(player.getInventory().selectedSlot, new ItemStack(Items.DIAMOND_SWORD));
+
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
+						"ungraft_behavior", "{}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
+								+ "\"cooldown_ticks\":40,\"parameters\":"
+								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "p0-graftstate";
+		AgentOrchestrator.send(server, player, conversationId, "\u7ed9\u6211\u624b\u91cc\u7684\u5251\u52a0\u4e2a\u52a0\u901f", null, recorder);
+
+		await(ctx, 30_000, () -> confirmationCount(recorder) > 0, () -> {
+			var pending = pendingOf(recorder);
+
+			// swap to a sword with the SAME normal components but a graft on it
+			var grafted = new ItemStack(Items.DIAMOND_SWORD);
+			grafted.set(WorldForgeComponents.BEHAVIOR_GRAFT, new dev.worldforge.component.BehaviorGraft(List.of(
+					new dev.worldforge.definition.BehaviorDefinition(
+							"right_click", List.of("heal"), java.util.Map.of("amount", 2.0), 40))));
+			player.getInventory().setStack(player.getInventory().selectedSlot, grafted);
+
+			ctx.assertTrue(AgentOrchestrator.confirm(player.getUuid(), conversationId,
+					pending.confirmationId()), "the confirmation must be accepted");
+
+			await(ctx, 30_000, () -> finished(recorder, "graft_behavior") != null, () -> {
+				var done = finished(recorder, "graft_behavior");
+				ctx.assertEquals(ToolEventStatus.FAILED, done.status(),
+						"the graft must fail when the graft state differs: " + done.summary());
+				ctx.assertEquals(1, dev.worldforge.behavior.BehaviorEngine.graftBehaviors(
+						player.getMainHandStack()).size(),
+						"the swapped sword must not receive the refused behaviour");
+				AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+				ctx.complete();
+			});
+		});
+	}
+
+	/**
+	 * P0: two items whose ENTIRE data-component map is identical but which are
+	 * different server-side ItemStack instances are different targets.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p0-id",
+			tickLimit = 60_000)
+	public void identicalContentButDifferentInstanceRefusesTheGraft(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-p0-instance");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		player.getInventory().setStack(player.getInventory().selectedSlot, new ItemStack(Items.DIAMOND_SWORD));
+
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
+						"ungraft_behavior", "{}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
+								+ "\"cooldown_ticks\":40,\"parameters\":"
+								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "p0-instance";
+		AgentOrchestrator.send(server, player, conversationId, "\u7ed9\u6211\u624b\u91cc\u7684\u5251\u52a0\u4e2a\u52a0\u901f", null, recorder);
+
+		await(ctx, 30_000, () -> confirmationCount(recorder) > 0, () -> {
+			var pending = pendingOf(recorder);
+
+			// swap to a byte-identical sword: a NEW ItemStack instance with the
+			// exact same (empty) component map
+			player.getInventory().setStack(player.getInventory().selectedSlot,
+					new ItemStack(Items.DIAMOND_SWORD));
+
+			ctx.assertTrue(AgentOrchestrator.confirm(player.getUuid(), conversationId,
+					pending.confirmationId()), "the confirmation must be accepted");
+
+			await(ctx, 30_000, () -> finished(recorder, "graft_behavior") != null, () -> {
+				var done = finished(recorder, "graft_behavior");
+				ctx.assertEquals(ToolEventStatus.FAILED, done.status(),
+						"an instance swap with identical content must still be refused: " + done.summary());
+				ctx.assertFalse(player.getMainHandStack().getComponents()
+								.contains(WorldForgeComponents.BEHAVIOR_GRAFT),
+						"the identical twin must not receive the refused behaviour");
+				AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+				ctx.complete();
+			});
+		});
+	}
+
+	/**
+	 * P0: the behaviour set changing during an UNGRAFT confirmation must
+	 * refuse the undo.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p0-id",
+			tickLimit = 60_000)
+	public void behaviorSetChangeDuringUngraftConfirmationRefusesTheUndo(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-p0-ungchg");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		var sword = new ItemStack(Items.DIAMOND_SWORD);
+		sword.set(WorldForgeComponents.BEHAVIOR_GRAFT, new dev.worldforge.component.BehaviorGraft(List.of(
+				new dev.worldforge.definition.BehaviorDefinition(
+						"right_click", List.of("heal"), java.util.Map.of("amount", 2.0), 40))));
+		player.getInventory().setStack(player.getInventory().selectedSlot, sword);
+
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c9",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\",\"cooldown_ticks\":40,\"parameters\":{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "p0-ungchg";
+		AgentOrchestrator.send(server, player, conversationId, "\u64a4\u9500\u5b83", null, recorder);
+
+		await(ctx, 30_000, () -> confirmationCount(recorder) > 0, () -> {
+			var pending = pendingOf(recorder);
+
+			// the behaviour set changes while the undo is pending
+			ItemStack held = player.getMainHandStack();
+			held.set(WorldForgeComponents.BEHAVIOR_GRAFT, new dev.worldforge.component.BehaviorGraft(List.of(
+					new dev.worldforge.definition.BehaviorDefinition(
+							"right_click", List.of("heal"), java.util.Map.of("amount", 2.0), 40),
+					new dev.worldforge.definition.BehaviorDefinition(
+							"right_click", List.of("experience"), java.util.Map.of("amount", 10), 40))));
+
+			ctx.assertTrue(AgentOrchestrator.confirm(player.getUuid(), conversationId,
+					pending.confirmationId()), "the confirmation must be accepted");
+
+			await(ctx, 30_000, () -> finished(recorder, "ungraft_behavior") != null, () -> {
+				var done = finished(recorder, "ungraft_behavior");
+				ctx.assertEquals(ToolEventStatus.FAILED, done.status(),
+						"the undo must fail when the behaviour set changed: " + done.summary());
+				ctx.assertEquals(2, dev.worldforge.behavior.BehaviorEngine.graftBehaviors(
+						player.getMainHandStack()).size(),
+						"the changed behaviour set must be untouched");
+				AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+				ctx.complete();
+			});
+		});
+	}
+
+	/**
+	 * P0: a normal cooldown update during the confirmation window must NOT
+	 * invalidate a legitimate confirmation. The cooldown state is excluded
+	 * from the fingerprint on purpose.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p0-id",
+			tickLimit = 60_000)
+	public void cooldownUpdateDuringConfirmationDoesNotBreakTheGraft(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-p0-cooldown");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		var sword = new ItemStack(Items.DIAMOND_SWORD);
+		sword.set(WorldForgeComponents.BEHAVIOR_GRAFT, new dev.worldforge.component.BehaviorGraft(List.of(
+				new dev.worldforge.definition.BehaviorDefinition(
+						"right_click", List.of("heal"), java.util.Map.of("amount", 2.0), 40))));
+		player.getInventory().setStack(player.getInventory().selectedSlot, sword);
+
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
+						"ungraft_behavior", "{}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
+								+ "\"cooldown_ticks\":40,\"parameters\":"
+								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "p0-cooldown";
+		AgentOrchestrator.send(server, player, conversationId, "\u518d\u7ed9\u6211\u624b\u91cc\u7684\u5251\u52a0\u4e2a\u52a0\u901f", null, recorder);
+
+		await(ctx, 30_000, () -> confirmationCount(recorder) > 0, () -> {
+			var pending = pendingOf(recorder);
+
+			// a normal cooldown tick updates BEHAVIOR_STATE on the same stack
+			player.getMainHandStack().set(WorldForgeComponents.BEHAVIOR_STATE,
+					new dev.worldforge.component.BehaviorState(12345L));
+
+			ctx.assertTrue(AgentOrchestrator.confirm(player.getUuid(), conversationId,
+					pending.confirmationId()), "the confirmation must be accepted");
+
+			await(ctx, 30_000, () -> finished(recorder, "graft_behavior") != null, () -> {
+				var done = finished(recorder, "graft_behavior");
+				ctx.assertEquals(ToolEventStatus.SUCCEEDED, done.status(),
+						"a cooldown update must not break a legitimate graft: " + done.summary());
+				ctx.assertEquals(2, dev.worldforge.behavior.BehaviorEngine.graftBehaviors(
+						player.getMainHandStack()).size(),
+						"the new behaviour must be on the stack");
+				AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+				ctx.complete();
+			});
+		});
+	}
+
+	// ------------------------------------------------- P1 ungraft scope (v0.7.4)
+
+	/**
+	 * P1: with TWO behaviours on the stack, ungraft with behavior_index removes
+	 * ONLY that one. The other behaviour and every other component survive.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p1-ungraft",
+			tickLimit = 60_000)
+	public void ungraftSingleBehaviorByIndexKeepsTheRest(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-p1-ungraft-idx");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		var sword = new ItemStack(Items.DIAMOND_SWORD);
+		sword.set(WorldForgeComponents.BEHAVIOR_GRAFT, new dev.worldforge.component.BehaviorGraft(List.of(
+				new dev.worldforge.definition.BehaviorDefinition(
+						"right_click", List.of("heal"), java.util.Map.of("amount", 2.0), 40),
+				new dev.worldforge.definition.BehaviorDefinition(
+						"right_click", List.of("experience"), java.util.Map.of("amount", 10), 40))));
+		player.getInventory().setStack(player.getInventory().selectedSlot, sword);
+		var before = player.getMainHandStack().getComponents().getTypes();
+
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c9",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\",\"cooldown_ticks\":40,\"parameters\":{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "p1-ungraft-idx";
+		AgentOrchestrator.send(server, player, conversationId, "\u64a4\u9500\u7b2c\u4e8c\u4e2a\u884c\u4e3a", null, recorder);
+
+		await(ctx, 30_000, () -> confirmationCount(recorder) > 0, () -> {
+			var pending = pendingOf(recorder);
+			ctx.assertTrue(pending != null && pending.summary().contains("第 1 个行为"),
+					"the preview must name the exact behaviour: " + (pending == null ? "" : pending.summary()));
+			ctx.assertTrue(AgentOrchestrator.confirm(player.getUuid(), conversationId,
+					pending.confirmationId()), "the confirmation must be accepted");
+
+			await(ctx, 30_000, () -> finished(recorder, "ungraft_behavior") != null, () -> {
+				var done = finished(recorder, "ungraft_behavior");
+				ctx.assertEquals(ToolEventStatus.SUCCEEDED, done.status(),
+						"the single undo must succeed: " + done.summary());
+				var rest = dev.worldforge.behavior.BehaviorEngine.graftBehaviors(
+						player.getMainHandStack());
+				ctx.assertEquals(1, rest.size(), "exactly one behaviour must remain");
+				ctx.assertTrue("heal".equals(rest.get(0).actions().get(0)),
+						"the heal behaviour must be the one that remains");
+				// nothing else on the stack changed
+				var after = player.getMainHandStack().getComponents().getTypes();
+				ctx.assertEquals(before, after,
+						"the component set must be unchanged apart from the graft contents");
+				AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+				ctx.complete();
+			});
+		});
+	}
+
+	/**
+	 * P1: all=true removes every behaviour (explicit full undo).
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p1-ungraft",
+			tickLimit = 60_000)
+	public void ungraftAllWithExplicitFlagRemovesEverything(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-p1-ungraft-all");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		var sword = new ItemStack(Items.DIAMOND_SWORD);
+		sword.set(WorldForgeComponents.BEHAVIOR_GRAFT, new dev.worldforge.component.BehaviorGraft(List.of(
+				new dev.worldforge.definition.BehaviorDefinition(
+						"right_click", List.of("heal"), java.util.Map.of("amount", 2.0), 40),
+				new dev.worldforge.definition.BehaviorDefinition(
+						"right_click", List.of("experience"), java.util.Map.of("amount", 10), 40))));
+		player.getInventory().setStack(player.getInventory().selectedSlot, sword);
+
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c9",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\",\"cooldown_ticks\":40,\"parameters\":{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "p1-ungraft-all";
+		AgentOrchestrator.send(server, player, conversationId, "\u5168\u90e8\u64a4\u9500", null, recorder);
+
+		await(ctx, 30_000, () -> confirmationCount(recorder) > 0, () -> {
+			var pending = pendingOf(recorder);
+			ctx.assertTrue(pending != null && pending.summary().contains("2 \u4e2a"),
+					"the preview must state the full count");
+			ctx.assertTrue(AgentOrchestrator.confirm(player.getUuid(), conversationId,
+					pending.confirmationId()), "the confirmation must be accepted");
+
+			await(ctx, 30_000, () -> finished(recorder, "ungraft_behavior") != null, () -> {
+				var done = finished(recorder, "ungraft_behavior");
+				ctx.assertEquals(ToolEventStatus.SUCCEEDED, done.status(),
+						"the full undo must succeed: " + done.summary());
+				ctx.assertFalse(player.getMainHandStack().getComponents()
+								.contains(WorldForgeComponents.BEHAVIOR_GRAFT),
+						"the graft component must be gone");
+				AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+				ctx.complete();
+			});
+		});
+	}
+
+	/**
+	 * P1: ungraft with NO index on a multi-behaviour item is ambiguous and
+	 * must fail closed without touching anything.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p1-ungraft",
+			tickLimit = 60_000)
+	public void ungraftWithoutIndexOnManyBehaviorsFailsClosed(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-p1-ungraft-amb");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		var sword = new ItemStack(Items.DIAMOND_SWORD);
+		sword.set(WorldForgeComponents.BEHAVIOR_GRAFT, new dev.worldforge.component.BehaviorGraft(List.of(
+				new dev.worldforge.definition.BehaviorDefinition(
+						"right_click", List.of("heal"), java.util.Map.of("amount", 2.0), 40),
+				new dev.worldforge.definition.BehaviorDefinition(
+						"right_click", List.of("experience"), java.util.Map.of("amount", 10), 40))));
+		player.getInventory().setStack(player.getInventory().selectedSlot, sword);
+
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c9",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\",\"cooldown_ticks\":40,\"parameters\":{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "p1-ungraft-amb";
+		AgentOrchestrator.send(server, player, conversationId, "\u64a4\u9500", null, recorder);
+
+		await(ctx, 30_000, () -> finished(recorder, "ungraft_behavior") != null, () -> {
+			var done = finished(recorder, "ungraft_behavior");
+			ctx.assertEquals(ToolEventStatus.FAILED, done.status(),
+					"an ambiguous undo must fail: " + done.summary());
+			ctx.assertEquals(2, dev.worldforge.behavior.BehaviorEngine.graftBehaviors(
+					player.getMainHandStack()).size(),
+					"nothing may be removed by an ambiguous request");
+			AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+			ctx.complete();
+		});
+	}
+
+	/**
+	 * P1: two IDENTICAL behaviours on the stack — removing by index removes
+	 * exactly one of them, the other identical one remains.
+	 */
+	@GameTest(templateName = "fabric-gametest-api-v1:empty", batchId = "worldforge-graft-p1-ungraft",
+			tickLimit = 60_000)
+	public void duplicateBehaviorsRemoveExactlyOneByIndex(TestContext ctx) {
+		var dir = TestTempDirs.create("wf-p1-ungraft-dup");
+		WorldForgeRuntimeManager.attachStoreForTesting(new DefinitionStore(dir));
+
+		var server = ctx.getWorld().getServer();
+		ServerPlayerEntity player = ctx.createMockCreativeServerPlayerInWorld();
+		player.getServer().getPlayerManager().getOpList()
+				.add(new net.minecraft.server.OperatorEntry(player.getGameProfile(), 2, false));
+
+		var sword = new ItemStack(Items.DIAMOND_SWORD);
+		sword.set(WorldForgeComponents.BEHAVIOR_GRAFT, new dev.worldforge.component.BehaviorGraft(List.of(
+				new dev.worldforge.definition.BehaviorDefinition(
+						"right_click", List.of("heal"), java.util.Map.of("amount", 2.0), 40),
+				new dev.worldforge.definition.BehaviorDefinition(
+						"right_click", List.of("heal"), java.util.Map.of("amount", 2.0), 40))));
+		player.getInventory().setStack(player.getInventory().selectedSlot, sword);
+
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c9",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\",\"cooldown_ticks\":40,\"parameters\":{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
+		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
+
+		var recorder = new AgentEventRecorder();
+		String conversationId = "p1-ungraft-dup";
+		AgentOrchestrator.send(server, player, conversationId, "\u64a4\u9500\u7b2c\u4e00\u4e2a", null, recorder);
+
+		await(ctx, 30_000, () -> confirmationCount(recorder) > 0, () -> {
+			var pending = pendingOf(recorder);
+			ctx.assertTrue(AgentOrchestrator.confirm(player.getUuid(), conversationId,
+					pending.confirmationId()), "the confirmation must be accepted");
+
+			await(ctx, 30_000, () -> finished(recorder, "ungraft_behavior") != null, () -> {
+				var done = finished(recorder, "ungraft_behavior");
+				ctx.assertEquals(ToolEventStatus.SUCCEEDED, done.status(),
+						"the indexed undo must succeed: " + done.summary());
+				ctx.assertEquals(1, dev.worldforge.behavior.BehaviorEngine.graftBehaviors(
+						player.getMainHandStack()).size(),
+						"exactly one of the duplicates must remain");
+				AgentOrchestrator.releaseSession(player.getUuid(), conversationId);
+				ctx.complete();
+			});
+		});
+	}
+
 	// ------------------------------------------------------------- helpers
 
 	/**
@@ -320,11 +935,22 @@ public class WorldForgeGraftTests {
 		// player holds a fresh diamond sword
 		player.getInventory().setStack(player.getInventory().selectedSlot, new ItemStack(Items.DIAMOND_SWORD));
 
-		var provider = MockToolProvider.responding(userMessage ->
-				new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1", "graft_behavior",
-						"{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
+						"ungraft_behavior", "{}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
 								+ "\"cooldown_ticks\":40,\"parameters\":"
-								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}"))));
+								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
 		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
 
 		var recorder = new AgentEventRecorder();
@@ -380,11 +1006,22 @@ public class WorldForgeGraftTests {
 				net.minecraft.text.Text.literal("我的剑"));
 		player.getInventory().setStack(player.getInventory().selectedSlot, namedSword);
 
-		var provider = MockToolProvider.responding(userMessage ->
-				new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1", "graft_behavior",
-						"{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
+						"ungraft_behavior", "{}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\","
 								+ "\"cooldown_ticks\":40,\"parameters\":"
-								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}"))));
+								+ "{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
 		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
 
 		var recorder = new AgentEventRecorder();
@@ -442,8 +1079,20 @@ public class WorldForgeGraftTests {
 		player.getInventory().setStack(player.getInventory().selectedSlot, sword);
 
 		// the model asks for ungraft
-		var provider = MockToolProvider.responding(userMessage ->
-				new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1", "ungraft_behavior", "{}"))));
+		var asked = new java.util.concurrent.atomic.AtomicInteger();
+		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
+		// lambda must answer ANY test's message correctly (see MockToolProvider).
+		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{}")));
+			}
+			if (asked.getAndIncrement() == 0) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c9",
+						"graft_behavior", "{\"action\":\"apply_effect\",\"trigger\":\"right_click\",\"cooldown_ticks\":40,\"parameters\":{\"effect\":\"minecraft:speed\",\"duration\":200,\"amplifier\":1}}")));
+			}
+			return new ChatTurn.Turn.Final("\u597d\u4e86\u3002");
+		});
 		dev.worldforge.ai.AgentBridge.attachProviderForTesting(provider, cfg());
 
 		var recorder = new AgentEventRecorder();

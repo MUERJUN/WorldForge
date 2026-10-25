@@ -165,4 +165,125 @@ class BehaviorPolicyTest {
 		assertSame(BehaviorPolicy.DEFAULT, BehaviorPolicy.get(),
 				"null must reset to the default policy");
 	}
+
+	// ------------------------------------------- v0.7.4 conflict & config
+
+	@Test
+	void anActionInBothListsIsDenied() {
+		// restrictedActions takes priority over allowedActions: a mis-edited
+		// config that lists the same action in both arrays must fail CLOSED
+		var policy = BehaviorPolicy.of(Set.of("summon_lightning"), Set.of("summon_lightning"));
+		assertFalse(policy.canExecute("summon_lightning",
+				def("summon_lightning", Map.of())),
+				"an action in BOTH lists must be denied (restricted wins)");
+	}
+
+	@Test
+	void anAdminRestrictionBeatsADefaultSafeAction() {
+		// teleport is safe by default, but an explicit restriction wins
+		var policy = BehaviorPolicy.of(Set.of("teleport"), Set.of("teleport"));
+		assertFalse(policy.canExecute("teleport", def("teleport", Map.of())),
+				"an explicitly restricted safe action must be denied");
+	}
+
+	@Test
+	void anExplicitAdminAllowBeatsTheDefaultRestriction() {
+		// summon_lightning is dangerous by default; the ONLY way to enable it
+		// is an explicit allow AND it must NOT also be restricted
+		var policy = BehaviorPolicy.of(Set.of("summon_lightning"), Set.of());
+		assertTrue(policy.canExecute("summon_lightning",
+				def("summon_lightning", Map.of())),
+				"an explicit admin allow (with no restriction) must permit the action");
+	}
+
+	// -------------------------------------------------- file load / reload
+
+	@Test
+	void invalidJsonKeepsTheLastValidPolicy(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir)
+			throws Exception {
+		// 1. a valid policy is loaded first
+		BehaviorPolicy.set(BehaviorPolicy.of(Set.of("explosion"), Set.of("heal")));
+		assertTrue(BehaviorPolicy.get().canExecute("explosion", def("explosion", Map.of())),
+				"setup: the custom policy must be active");
+
+		// 2. the operator breaks the config file
+		var cfg = dir.resolve("config/worldforge/behavior-policy.json");
+		java.nio.file.Files.createDirectories(cfg.getParent());
+		java.nio.file.Files.writeString(cfg, "{ not valid json ]");
+
+		// 3. loading the broken file must NOT relax the active policy
+		BehaviorPolicy.load(dir);
+		assertTrue(BehaviorPolicy.get().canExecute("explosion",
+				def("explosion", Map.of())),
+				"the last valid policy must stay in force after a broken config");
+		assertFalse(BehaviorPolicy.get().canExecute("heal", def("heal", Map.of())),
+				"the admin restriction from the last valid policy must survive");
+	}
+
+	@Test
+	void wrongConfigStructureKeepsTheLastValidPolicy(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir)
+			throws Exception {
+		BehaviorPolicy.set(BehaviorPolicy.of(Set.of(), Set.of("teleport")));
+
+		var cfg = dir.resolve("config/worldforge/behavior-policy.json");
+		java.nio.file.Files.createDirectories(cfg.getParent());
+		// allowedActions is a STRING, not an array — structurally invalid
+		java.nio.file.Files.writeString(cfg,
+				"{\"allowedActions\": \"summon_lightning\", \"restrictedActions\": []}");
+
+		BehaviorPolicy.load(dir);
+		assertFalse(BehaviorPolicy.get().canExecute("teleport", def("teleport", Map.of())),
+				"a structurally broken config must not swap in a new policy");
+		assertFalse(BehaviorPolicy.get().canExecute("summon_lightning",
+				def("summon_lightning", Map.of())),
+				"the broken allow list must never open a dangerous action");
+	}
+
+	@Test
+	void firstStartupWithBrokenConfigUsesTheSafeDefault(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir)
+			throws Exception {
+		BehaviorPolicy.set(BehaviorPolicy.DEFAULT);
+
+		var cfg = dir.resolve("config/worldforge/behavior-policy.json");
+		java.nio.file.Files.createDirectories(cfg.getParent());
+		java.nio.file.Files.writeString(cfg, "]]] not json");
+
+		BehaviorPolicy.load(dir);
+		assertSame(BehaviorPolicy.DEFAULT, BehaviorPolicy.get(),
+				"first startup with a broken config must degrade to the safe default");
+		assertFalse(BehaviorPolicy.get().canExecute("explosion", def("explosion", Map.of())),
+				"the safe default must deny dangerous actions");
+	}
+
+	@Test
+	void reloadSwapsInANewPolicyOnlyWhenTheFileIsValid(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir)
+			throws Exception {
+		var cfg = dir.resolve("config/worldforge/behavior-policy.json");
+		java.nio.file.Files.createDirectories(cfg.getParent());
+		java.nio.file.Files.writeString(cfg,
+				"{\"allowedActions\": [\"summon_lightning\"], \"restrictedActions\": []}");
+
+		BehaviorPolicy.set(BehaviorPolicy.DEFAULT);
+		assertTrue(BehaviorPolicy.reload(dir), "a valid config must reload successfully");
+		assertTrue(BehaviorPolicy.get().canExecute("summon_lightning",
+				def("summon_lightning", Map.of())),
+				"the reloaded policy must be active");
+
+		// now break the file and reload: the valid policy must survive
+		java.nio.file.Files.writeString(cfg, "{{{ broken");
+		assertFalse(BehaviorPolicy.reload(dir), "a broken config must fail the reload");
+		assertTrue(BehaviorPolicy.get().canExecute("summon_lightning",
+				def("summon_lightning", Map.of())),
+				"the last valid policy must stay active after a failed reload");
+	}
+
+	@Test
+	void reloadWithMissingFileFallsBackToTheSafeDefault(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) {
+		BehaviorPolicy.set(BehaviorPolicy.of(Set.of("explosion"), Set.of()));
+		assertTrue(BehaviorPolicy.reload(dir),
+				"a missing config file is an explicit operator choice -> default");
+		assertSame(BehaviorPolicy.DEFAULT, BehaviorPolicy.get());
+		assertFalse(BehaviorPolicy.get().canExecute("explosion", def("explosion", Map.of())),
+				"the fallback must be the safe default, not the previous policy");
+	}
 }

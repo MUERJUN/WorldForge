@@ -2,6 +2,106 @@
 
 # 更新日志
 
+## v0.7.4 — Graft 身份绑定与行为策略安全修复
+
+### P0：Graft 确认快照的状态遗漏修复
+
+v0.7.3 的确认快照把 `BEHAVIOR_GRAFT` 和 `BEHAVIOR_STATE` 都排除在指纹之外，且用
+`toString()` 序列化组件值。两个缺陷：确认期间**原有嫁接被改动**时快照不变（改了也检测不到）；
+`toString()` 不是规范、稳定、无碰撞的序列化。
+
+**修复**（`GraftBehaviorTool.stackSnapshot` 重新设计）——三重联合绑定：
+
+1. **实例身份**：服务端 ItemStack 对象的 identity hash。两件数据组件完全相同的物品
+   互换（不同实例）也会被拒绝——「行为效果相同」不等于「同一个操作目标」；
+2. **槽位**：工具始终绑定主手（preparer 读取 `getMainHandStack()`）；
+3. **内容指纹**：用 Minecraft 自带的 NBT 编码器（`ItemStack.encode`）序列化
+   **包含 GRAFT**、**排除 STATE（冷却）**的完整组件映射，SHA-256 摘要。
+   序列化失败时回退到有序的类型+值列表，永不抛异常。
+
+任何一部分变化都会使快照不同 → 编排器拒绝执行并提示重新确认（fail-closed）。
+冷却状态正常更新**不会**破坏合法确认（STATE 被刻意排除）。
+
+**新增 GameTest（5 项，batch `worldforge-graft-p0-id`）**：确认期间原有嫁接被改动 → 拒绝；
+普通组件相同但嫁接状态不同 → 拒绝；所有组件相同但实例不同 → 拒绝；
+Ungraft 确认期间行为集合变化 → 拒绝；确认期间冷却更新 → **正常执行**。
+
+### P1：BehaviorPolicy 策略冲突修复
+
+- **restrictedActions 优先于 allowedActions**：同一动作出现在两个列表时一律拒绝
+  （fail-closed 优先于 fail-open）。
+- 未知动作、默认危险动作依然拒绝。
+- **配置解析失败保留最后一份有效策略**：JSON 语法错误或字段类型不符（如
+  allowedActions 写成字符串）都不会换入新策略；首次启动遇到无效配置采用安全默认。
+- 配置模板的重复 `"//"` JSON 键改为独立的 `_doc`/`_actions`/`_defaults`/`_reload` 键。
+- 日志不含密钥或玩家隐私信息。
+
+**新增 JUnit（8 项）**：双列表冲突拒绝、管理员禁止安全动作、显式允许危险动作、
+无效 JSON/坏结构保留现策略、首启坏配置降级安全默认、reload 成功换入/失败保留、
+缺文件回退安全默认。
+
+### P1：`/wf policy reload` 服务端热重载
+
+v0.7.3 只在启动时读取一次策略文件（改文件要重启）。v0.7.4 新增：
+
+- `/wf policy reload`（OP2）：在服务端线程重读
+  `config/worldforge/behavior-policy.json`，完整解析并校验成功才替换当前策略；
+  失败保留现策略并向操作者返回明确错误。
+- `/wf policy status`（OP2）：显示当前生效的允许/拒绝列表。
+- 重载成功后，已嫁接行为在下一次触发时按新策略执行。
+- README 与 BETA-GUIDE 已写明配置路径、权限要求、重载方式与失败行为。
+
+### P1：Ungraft 撤销范围明确化
+
+v0.7.3 的 `ungraft_behavior` 会删除整个嫁接组件（移除全部行为）。v0.7.4：
+
+- 新参数 `behavior_index`（0 起始）：只移除指定的那一个行为，其余保留；
+- 新参数 `all: true`：显式全部撤销；
+- 恰好只有一个行为时不带参数 → 撤销它（向后兼容）；
+- 多个行为且未指定 → **拒绝执行**（fail-closed），错误信息列出带序号的完整行为清单；
+- 确认预览明确显示将删除哪一个/全部行为；执行时重新校验序号与当前行为集合；
+- 只重建嫁接列表，**不触碰**原版附魔、耐久、名称或其它模组的数据组件。
+
+**新增 GameTest（4 项，batch `worldforge-graft-p1-ungraft`）**：按序号单项撤销其余保留、
+all=true 全部撤销、多行为无序号拒绝且零改动、重复行为按序号只删一个。
+
+### 测试套件稳定性修复
+
+GameTest 批次并发运行且 Mock 模型是全局单例——新增测试的固定响应 lambda 会与
+其它批次互相毒化（v0.7.3 全量运行时 8 个测试因此超时）。所有新增测试的模型 lambda
+已改为**消息驱动 + 计数器**模式（与主测试套件约定一致），对任意测试的消息都能给出
+正确响应。
+
+### 验收结果
+
+| 门禁 | 结果 |
+|------|------|
+| 全量 JUnit | **366/366**（含 DsmlParsingTest×7） |
+| WorldForge GameTest | **87/87**（含 P0×5 + P1×4 新增） |
+| 真实模型验收 | **4/4 全部 PASSED**（含完整 graft→undo 双轮链路） |
+| Linux CI | 见 GitHub Actions |
+
+### 真实模型兼容性修复：DeepSeek DSML 文本格式
+
+真实模型验收发现：DeepSeek 在收到包含全部 14 个工具 Schema 的请求时，有时**不用**
+OpenAI 原生 `tool_calls` 通道，而是在消息文本里输出它私有的
+`<DSML invoke name="...">` 标记。v0.7.3 的解析器会把它当作纯文字——工具调用丢失。
+
+**修复**：`ToolCallingSupport.parseResponse` 新增第三层解析（原生 → JSON 信封 → DSML
+→ 纯文字）。DSML 提取出的调用产生与原生完全相同的 `ModelToolCall`，走**相同的**
+Schema 校验与确认门——兼容桥接，绝非绕过。工具名不符合 `[a-z_]`、标签未闭合、
+重建 JSON 无法解析时一律 fail-closed 返回纯文字。
+
+**新增 DsmlParsingTest（7 项）**：真实响应样本解析、原生通道优先、纯文字不误判、
+奇怪工具名拒绝、未闭合标签拒绝、下游校验仍生效。
+
+**链路验收**：`theRealServiceCompletesGraftThenUndo` 用真实 DeepSeek 完成
+graft → 工具结果回灌 → ungraft 双轮对话；无 API Key 时如实跳过并注明"未验证"。
+
+**测试基建修复**：`RealModelAcceptanceTest` 使用了错误的注册表重置模式
+（`ToolRegistry.resetForTest` 不清除 `ToolCatalog` 的幂等标志，导致后续测试拿到
+空工具表）。已统一为 `ToolCatalog.resetForTest()`。
+
 ## v0.7.3 — 发布质量修复与权限分离
 
 ### P0-1：修复 JAR 文件名与版本元数据

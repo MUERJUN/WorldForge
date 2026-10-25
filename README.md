@@ -7,7 +7,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 - 游戏版本：Minecraft Java **1.21.1**
 - 加载器：Fabric Loader **0.16.9** + Fabric API **0.116.5+1.21.1**
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**
-- 当前版本：**v0.7.3 Public Beta**
+- 当前版本：**v0.7.4 Public Beta**
 
 ---
 
@@ -16,7 +16,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 **普通玩家安装（无需开发环境）：**
 
 1. 安装 [Fabric Loader 0.16.9](https://fabricmc.net/use/installer/)，选择 Minecraft **1.21.1**。
-2. 下载 [Fabric API 0.116.5+1.21.1](https://modrinth.com/mod/fabric-api) 与 GitHub Release 的 `worldforge-0.7.3.jar`。
+2. 下载 [Fabric API 0.116.5+1.21.1](https://modrinth.com/mod/fabric-api) 与 GitHub Release 的 `worldforge-0.7.4.jar`。
 3. 把两个 JAR 放入 `.minecraft/mods/`，启动游戏。
 4. 进入单人世界，按 **K** 打开 **AI 聊天**。
 5. 第一次使用先点聊天右上角 **⚙ 设置**，填入 API Key（单人游戏直接生效，重启无效）。
@@ -242,6 +242,8 @@ AI 也能创建方块：`创建一个魔法熔炉，外观像熔炉，周期性�
 /wf setdamage <id> <value>        — 修改攻击力
 /wf delete <id>                   — 删除物品定义
 /wf reload                        — 重载定义
+/wf policy reload                 — 重载行为执行策略 (OP2)
+/wf policy status                 — 查看当前行为策略 (OP2)
 /wf demo                          — 创建 10 种演示物品
 
 /wf block help                    — 方块命令帮助
@@ -253,6 +255,36 @@ AI 也能创建方块：`创建一个魔法熔炉，外观像熔炉，周期性�
 ```
 
 写操作需要 OP2 权限。
+
+---
+
+## 行为执行策略（服务端权限）
+
+「给原版剑嫁接行为」用的是 SELF 权限——玩家只能改**自己手里**的物品。
+但「这个行为能否在当前世界执行」是另一回事，由服务端策略决定
+（v0.7.4 新增，`BehaviorPolicy`）：
+
+| 行为 | 默认 | 理由 |
+|------|------|------|
+| `heal` / `experience` / `teleport` | 允许 | 仅影响玩家自己 |
+| `apply_effect`（target=self） | 允许 | 仅影响玩家自己 |
+| `apply_effect`（target=他人） | **拒绝** | 影响其他实体（PvP） |
+| `summon_lightning` / `explosion` / `ignite` | **拒绝** | 改变世界、可破坏方块或伤害他人 |
+
+要点：
+
+- **配置文件**：`config/worldforge/behavior-policy.json`（首次启动自动生成模板）。
+  `allowedActions` 显式允许、`restrictedActions` 显式拒绝；
+  **restrictedActions 优先于 allowedActions**——同一动作出现在两个列表时一律拒绝。
+  两个列表都没写的动作按内置默认策略处理（未知动作一律拒绝）。
+- **生效时机**：策略在行为**触发时**校验，不是嫁接时。已嫁接的行为在服务器策略
+  变化后的下一次触发立即按新策略执行，被禁止时玩家会看到明确提示。
+- **重载**：编辑 JSON 后运行 `/wf policy reload`（OP2）。命令在服务端线程执行；
+  只有完整解析并校验成功才替换当前策略。
+- **失败行为**：配置解析失败（JSON 语法错误、字段类型不对）时**保留上一次有效策略**，
+  绝不静默放宽限制；首次启动遇到无效配置则采用安全默认策略。命令会返回失败提示。
+- **v0.7.3 行为差异**：v0.7.3 只在服务器启动时读取一次该文件（改文件需重启）；
+  v0.7.4 起提供 `/wf policy reload` 热重载。
 
 ---
 

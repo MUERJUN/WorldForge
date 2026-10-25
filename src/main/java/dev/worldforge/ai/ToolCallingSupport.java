@@ -113,7 +113,9 @@ public final class ToolCallingSupport {
 	 *
 	 * <p>Order matters: native {@code tool_calls} win; otherwise the assistant
 	 * text is checked for the strict structured envelope; otherwise the text
-	 * is the final answer.</p>
+	 * is checked for DeepSeek's proprietary DSML markup (some deployments of
+	 * the service answer in their own text format instead of using the OpenAI
+	 * {@code tool_calls} field); otherwise the text is the final answer.</p>
 	 */
 	public static ChatTurn.Turn parseResponse(String rawJson) {
 		var root = JsonParser.parseString(rawJson).getAsJsonObject();
@@ -154,8 +156,108 @@ public final class ToolCallingSupport {
 		if (structured != null) {
 			return structured;
 		}
-		// 3) plain answer
+		// 3) DeepSeek DSML text markup (v0.7.4): some deployments emit their
+		//    proprietary <DSML invoke> format in the CONTENT field instead of
+		//    the native tool_calls channel. Parsing it here keeps the
+		//    permission boundary identical: whatever is extracted goes through
+		//    the SAME schema validation and confirmation gate as a native call.
+		var dsml = parseDsmlCalls(content);
+		if (dsml != null) {
+			return dsml;
+		}
+		// 4) plain answer
 		return new ChatTurn.Turn.Final(content);
+	}
+
+	/**
+	 * Parses DeepSeek's proprietary DSML tool-call markup from assistant
+	 * text, e.g. {@code <｜｜DSML｜｜ invoke name="graft_behavior">…<｜｜DSML｜｜
+	 * parameter name="action">apply_effect</…parameter>…}.
+	 *
+	 * <p>Returns {@code null} for anything that does not parse cleanly — a
+	 * malformed reply must never be executed as a tool call. The extracted
+	 * arguments remain UNVALIDATED here: downstream they pass through the
+	 * same schema validation as native calls.</p>
+	 */
+	public static ChatTurn.Turn.Calls parseDsmlCalls(String content) {
+		if (content == null || content.isBlank() || !content.contains("invoke name=")) {
+			return null;
+		}
+		try {
+			List<ChatTurn.ModelToolCall> calls = new ArrayList<>();
+			// the separator decoration (full-width bars) is ignored by
+			// matching from the keyword outward
+			var invokePattern = java.util.regex.Pattern.compile(
+					"invoke name=\"([^\"]{1,64})\"(.*?)</[^>]*invoke>",
+					java.util.regex.Pattern.DOTALL);
+			var paramPattern = java.util.regex.Pattern.compile(
+					"parameter name=\"([^\"]+)\"[^>]*>(.*?)</[^>]*parameter>",
+					java.util.regex.Pattern.DOTALL);
+			var inv = invokePattern.matcher(content);
+			int n = 0;
+			while (inv.find()) {
+				String name = inv.group(1).trim();
+				if (name.isBlank() || !name.matches("[a-z_]{1,64}")) {
+					return null; // a weird name must never become a call
+				}
+				StringBuilder args = new StringBuilder("{");
+				var pm = paramPattern.matcher(inv.group(2));
+				boolean first = true;
+				while (pm.find()) {
+					String key = pm.group(1).trim();
+					String value = pm.group(2).trim();
+					if (key.isEmpty()) {
+						return null;
+					}
+					if (!first) {
+						args.append(',');
+					}
+					first = false;
+					// emit JSON-safe: raw JSON / numbers / booleans verbatim,
+					// everything else as a JSON string
+					if (value.startsWith("{") || value.startsWith("[")
+							|| value.matches("-?\\d+(\\.\\d+)?")
+							|| value.equals("true") || value.equals("false")) {
+						args.append(jsonString(key)).append(':').append(value);
+					} else {
+						args.append(jsonString(key)).append(':').append(jsonString(value));
+					}
+				}
+				args.append('}');
+				// the reconstruction must actually parse before it is used
+				var parsed = JsonParser.parseString(args.toString());
+				if (!parsed.isJsonObject()) {
+					return null;
+				}
+				calls.add(new ChatTurn.ModelToolCall("dsml_" + name + "_" + n, name, args.toString()));
+				n++;
+			}
+			return calls.isEmpty() ? null : new ChatTurn.Turn.Calls(calls);
+		} catch (Exception e) {
+			return null;
+		}
+	}
+
+	/** JSON string literal for a key/value (control characters escaped). */
+	private static String jsonString(String s) {
+		StringBuilder sb = new StringBuilder("\"");
+		for (char c : s.toCharArray()) {
+			switch (c) {
+				case '"' -> sb.append("\\\"");
+				case '\\' -> sb.append("\\\\");
+				case '\n' -> sb.append("\\n");
+				case '\r' -> sb.append("\\r");
+				case '\t' -> sb.append("\\t");
+				default -> {
+					if (c < 0x20) {
+						sb.append(String.format("\\u%04x", (int) c));
+					} else {
+						sb.append(c);
+					}
+				}
+			}
+		}
+		return sb.append('"').toString();
 	}
 
 	/**

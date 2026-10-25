@@ -72,6 +72,13 @@ public final class WorldForgeCommand {
 						.then(CommandManager.literal("reload")
 								.requires(s -> s.hasPermissionLevel(2))
 								.executes(ctx -> reload(ctx.getSource())))
+						// v0.7.4: server-side behaviour execution policy
+						.then(CommandManager.literal("policy")
+								.requires(s -> s.hasPermissionLevel(2))
+								.then(CommandManager.literal("reload")
+										.executes(ctx -> policyReload(ctx.getSource())))
+								.then(CommandManager.literal("status")
+										.executes(ctx -> policyStatus(ctx.getSource()))))
 						.then(CommandManager.literal("demo")
 								.requires(s -> s.hasPermissionLevel(2))
 								.executes(ctx -> demo(ctx.getSource())))
@@ -93,6 +100,7 @@ public final class WorldForgeCommand {
 		src.sendFeedback(() -> Text.literal("§e/wf setdamage <id> <n> §7- 热修改伤害 (OP2)"), false);
 		src.sendFeedback(() -> Text.literal("§e/wf delete <id> §7- 删除定义 (OP2)"), false);
 		src.sendFeedback(() -> Text.literal("§e/wf reload §7- 从世界存档重新加载 (OP2)"), false);
+		src.sendFeedback(() -> Text.literal("§e/wf policy reload|status §7- 行为执行策略 (OP2)"), false);
 		src.sendFeedback(() -> Text.literal("§e/wf demo §7- 一键创建 10 种测试物品 (OP2)"), false);
 		return 1;
 	}
@@ -196,6 +204,36 @@ public final class WorldForgeCommand {
 		}
 		src.sendError(Text.literal("§c" + r.message()));
 		return 0;
+	}
+
+	/**
+	 * v0.7.4: {@code /wf policy reload} (OP2) — re-reads
+	 * {@code config/worldforge/behavior-policy.json} on the server thread and
+	 * swaps it in only when it parses and validates. On failure the last
+	 * valid policy stays in force.
+	 */
+	private static int policyReload(ServerCommandSource src) {
+		var gameDir = net.fabricmc.loader.api.FabricLoader.getInstance().getGameDir();
+		boolean ok = dev.worldforge.behavior.BehaviorPolicy.reload(gameDir);
+		if (ok) {
+			src.sendFeedback(() -> Text.literal(
+					"§a行为策略已重新加载，已嫁接行为将在下次触发时按新策略校验。"), false);
+			return 1;
+		}
+		src.sendError(Text.literal(
+				"§c配置解析失败，已保留上一次有效策略。请检查 config/worldforge/behavior-policy.json 后重试。"));
+		return 0;
+	}
+
+	/** v0.7.4: {@code /wf policy status} (OP2) — shows the active policy. */
+	private static int policyStatus(ServerCommandSource src) {
+		var policy = dev.worldforge.behavior.BehaviorPolicy.get();
+		src.sendFeedback(() -> Text.literal("§b当前行为策略："), false);
+		src.sendFeedback(() -> Text.literal("§e允许: §f" + policy.allowedActions()), false);
+		src.sendFeedback(() -> Text.literal("§e拒绝: §f" + policy.restrictedActions()), false);
+		src.sendFeedback(() -> Text.literal(
+				"§7未列出的动作按内置默认策略处理（安全动作允许、危险与未知动作拒绝）。"), false);
+		return 1;
 	}
 
 	private static int demo(ServerCommandSource src) {

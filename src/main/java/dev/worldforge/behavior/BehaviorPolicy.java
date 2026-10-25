@@ -105,9 +105,53 @@ public final class BehaviorPolicy {
 	}
 
 	/**
+	 * v0.7.4: reloads the policy from the config file and swaps it in ONLY
+	 * when the file parses and validates completely. Called from the
+	 * {@code /wf policy reload} command (OP2) on the server thread.
+	 *
+	 * <p>On any failure the LAST VALID policy stays in force and {@code false}
+	 * is returned, so a broken edit can never silently relax or break the
+	 * active restrictions. A missing file falls back to the safe default —
+	 * an explicit operator action, so that is treated as intentional.</p>
+	 *
+	 * @return true when a new policy is now active
+	 */
+	public static boolean reload(Path gameDir) {
+		Path file = gameDir.resolve("config/worldforge/behavior-policy.json");
+		if (!Files.exists(file)) {
+			current = DEFAULT;
+			dev.worldforge.WorldForge.LOGGER.info(
+					"[WorldForge] policy file missing; the safe default policy is now active");
+			return true;
+		}
+		try {
+			String json = Files.readString(file);
+			JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+			Set<String> allowed = stringSet(o, "allowedActions");
+			Set<String> restricted = stringSet(o, "restrictedActions");
+			current = new BehaviorPolicy(allowed, restricted);
+			dev.worldforge.WorldForge.LOGGER.info(
+					"[WorldForge] policy reloaded: {} allowed, {} restricted by config",
+					allowed.size(), restricted.size());
+			return true;
+		} catch (Exception e) {
+			// keep the last valid policy — never fail open
+			dev.worldforge.WorldForge.LOGGER.error(
+					"[WorldForge] policy reload failed ({}); the last valid policy stays in force",
+					e.getMessage());
+			return false;
+		}
+	}
+
+	/**
 	 * Loads the policy from {@code config/worldforge/behavior-policy.json}.
-	 * If the file does not exist, a template is created and the default
-	 * policy is used.
+	 *
+	 * <p>v0.7.4 failure semantics: a file that does not exist gets a template
+	 * and the DEFAULT (safe) policy. A file that exists but cannot be parsed
+	 * or has an unexpected structure NEVER relaxes security — the LAST VALID
+	 * policy stays in force (on first startup that is the safe default), the
+	 * problem is logged, and the operator is expected to fix the file and
+	 * reload.</p>
 	 */
 	public static BehaviorPolicy load(Path gameDir) {
 		Path file = gameDir.resolve("config/worldforge/behavior-policy.json");
@@ -122,10 +166,12 @@ public final class BehaviorPolicy {
 			Set<String> restricted = stringSet(o, "restrictedActions");
 			return new BehaviorPolicy(allowed, restricted);
 		} catch (Exception e) {
-			dev.worldforge.WorldForge.LOGGER.warn(
-					"[WorldForge] failed to load behavior-policy.json, using defaults: {}",
+			// NEVER fall back to a MORE permissive policy than the one that is
+			// already in force. On first startup `current` is the safe default.
+			dev.worldforge.WorldForge.LOGGER.error(
+					"[WorldForge] behavior-policy.json is invalid ({}); keeping the LAST VALID policy",
 					e.getMessage());
-			return DEFAULT;
+			return current;
 		}
 	}
 
@@ -133,12 +179,13 @@ public final class BehaviorPolicy {
 	private static void createTemplate(Path file) {
 		try {
 			Files.createDirectories(file.getParent());
+			// distinct keys — duplicate JSON keys are invalid and break parsers
 			String tpl = """
 					{
-					  "//": "v0.7.3 行为执行策略：分离『能否修改自己物品』与『能否在当前世界执行行为』",
-					  "//": "默认允许安全行为（治疗、经验、传送、对自身施加效果），禁止危险行为（闪电、爆炸、点燃、对他人施加效果）",
-					  "//": "在 allowedActions 中添加动作可显式允许；在 restrictedActions 中添加可显式禁止",
-					  "//": "可用动作: heal, experience, teleport, apply_effect, summon_lightning, explosion, ignite",
+					  "_doc": "WorldForge v0.7.4 行为执行策略：分离『能否修改自己物品』与『能否在世界中执行行为』。restrictedActions 优先于 allowedActions；两个列表都不含的动作按内置默认策略处理（安全动作允许、危险动作拒绝、未知动作拒绝）。",
+					  "_actions": "可用动作: heal, experience, teleport, apply_effect, summon_lightning, explosion, ignite",
+					  "_defaults": "默认允许: heal, experience, teleport, apply_effect(仅 target=self)。默认拒绝: summon_lightning, explosion, ignite, apply_effect(对其他实体)。",
+					  "_reload": "修改本文件后运行 /wf policy reload (OP2) 生效；解析失败时保留上一次有效策略。",
 					  "allowedActions": [],
 					  "restrictedActions": []
 					}
@@ -149,15 +196,25 @@ public final class BehaviorPolicy {
 		}
 	}
 
+	/**
+	 * Reads a string-array field. A MISSING field is an empty set; a field
+	 * that exists with the WRONG type is a config error and throws, so the
+	 * caller keeps the last valid policy instead of silently loosening it.
+	 */
 	private static Set<String> stringSet(JsonObject o, String key) {
 		Set<String> out = new LinkedHashSet<>();
-		if (o.has(key) && o.get(key).isJsonArray()) {
-			JsonArray arr = o.getAsJsonArray(key);
-			for (JsonElement e : arr) {
-				if (e.isJsonPrimitive()) {
-					out.add(e.getAsString().toLowerCase(Locale.ROOT));
-				}
+		if (!o.has(key)) {
+			return out;
+		}
+		JsonElement el = o.get(key);
+		if (!el.isJsonArray()) {
+			throw new IllegalArgumentException(key + " must be an array of strings");
+		}
+		for (JsonElement e : el.getAsJsonArray()) {
+			if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isString()) {
+				throw new IllegalArgumentException(key + " must contain only strings");
 			}
+			out.add(e.getAsString().toLowerCase(Locale.ROOT));
 		}
 		return out;
 	}
@@ -176,12 +233,14 @@ public final class BehaviorPolicy {
 	public boolean canExecute(String action, BehaviorDefinition b) {
 		action = action.toLowerCase(Locale.ROOT);
 
-		// explicit server config takes priority
-		if (serverAllowed.contains(action)) {
-			return true;
-		}
+		// v0.7.4: RESTRICTED takes priority over ALLOWED. A denied action
+		// stays denied even when a (mis-edited) config lists it in both
+		// arrays — fail-closed beats fail-open.
 		if (serverRestricted.contains(action)) {
 			return false;
+		}
+		if (serverAllowed.contains(action)) {
+			return true;
 		}
 
 		// default policy
