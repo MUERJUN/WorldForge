@@ -126,6 +126,41 @@ public final class MockToolProvider implements ModelProvider, ToolCallingProvide
 		return "";
 	}
 
+	/**
+	 * v0.7.4: the suite-wide reserved message routes for the graft/ungraft
+	 * vocabulary. Returns the canonical tool call for a reserved message, or
+	 * {@code null} when the message is not reserved and the per-test lambda
+	 * should decide.
+	 *
+	 * <p>The three SPECIFIC undo phrases are reserved because different
+	 * ungraft tests need different arguments and the phrases must produce the
+	 * same call no matter which test's provider is attached. The plain
+	 * 「撤销」 family is deliberately NOT reserved: its meaning differs by
+	 * test state (one behaviour vs many), and every provider's own lambda
+	 * already answers it identically.</p>
+	 */
+	private static ChatTurn.Turn reservedRoute(String userMessage) {
+		if (userMessage == null) {
+			return null;
+		}
+		if (userMessage.contains("撤销第二个行为")) {
+			return reservedCall("{\"behavior_index\":1}");
+		}
+		if (userMessage.contains("全部撤销")) {
+			return reservedCall("{\"all\":true}");
+		}
+		if (userMessage.contains("撤销第一个")) {
+			return reservedCall("{\"behavior_index\":0}");
+		}
+		return null;
+	}
+
+	/** The canonical reserved answer: one ungraft call with fixed arguments. */
+	private static ChatTurn.Turn reservedCall(String argumentsJson) {
+		return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall(
+				"reserved_ungraft", "ungraft_behavior", argumentsJson)));
+	}
+
 	/** The messages the "model" received, turn by turn. */
 	public List<List<ChatTurn>> receivedMessages() {
 		return List.copyOf(received);
@@ -190,10 +225,19 @@ public final class MockToolProvider implements ModelProvider, ToolCallingProvide
 				if (delayMillis > 0) {
 					Thread.sleep(delayMillis);
 				}
+				// v0.7.4: suite-wide RESERVED routes answer BEFORE any per-test
+				// lambda. The GameTest runner runs batches concurrently and this
+				// provider is a global singleton, so whichever test's provider
+				// happens to be attached must still answer a RESERVED message
+				// identically — otherwise a concurrent batch's provider hands
+				// the reserved message the wrong tool call (observed on Linux
+				// CI as a refused indexed ungraft).
+				ChatTurn.Turn reserved = reservedRoute(userMessage);
 				Object next = forcedCall != null ? new ChatTurn.Turn.Calls(List.of(forcedCall))
-						: (byUserMessage != null
-								? byUserMessage.apply(userMessage)
-								: script.poll());
+						: (reserved != null ? reserved
+								: (byUserMessage != null
+										? byUserMessage.apply(userMessage)
+										: script.poll()));
 				if (next == null) {
 					next = new ChatTurn.Turn.Final(finalTextAfterTools);
 				} else if (next instanceof String s) {
