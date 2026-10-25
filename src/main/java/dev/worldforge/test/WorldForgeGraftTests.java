@@ -78,6 +78,18 @@ public class WorldForgeGraftTests {
 		// asking for another graft and the task would never end.
 		var grafted = new java.util.concurrent.atomic.AtomicInteger();
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("撤销")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2", "ungraft_behavior", "{}")));
 			}
@@ -214,6 +226,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
 						"ungraft_behavior", "{}")));
@@ -270,6 +294,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
 						"ungraft_behavior", "{}")));
@@ -350,6 +386,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
 						"ungraft_behavior", "{}")));
@@ -422,6 +470,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
 						"ungraft_behavior", "{}")));
@@ -487,6 +547,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
 						"ungraft_behavior", "{}")));
@@ -554,6 +626,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
 						"ungraft_behavior", "{}")));
@@ -623,6 +707,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
 						"ungraft_behavior", "{}")));
@@ -694,6 +790,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
 						"ungraft_behavior", "{\"behavior_index\":1}")));
@@ -762,6 +870,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
 						"ungraft_behavior", "{\"all\":true}")));
@@ -825,6 +945,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
 						"ungraft_behavior", "{}")));
@@ -880,6 +1012,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
 						"ungraft_behavior", "{\"behavior_index\":0}")));
@@ -939,6 +1083,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
 						"ungraft_behavior", "{}")));
@@ -1010,6 +1166,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c2",
 						"ungraft_behavior", "{}")));
@@ -1083,6 +1251,18 @@ public class WorldForgeGraftTests {
 		// v0.7.4: the provider is GLOBAL and batches run concurrently, so this
 		// lambda must answer ANY test's message correctly (see MockToolProvider).
 		var provider = MockToolProvider.responding(userMessage -> {
+			if (userMessage.contains("撤销第二个行为")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":1}")));
+			}
+			if (userMessage.contains("全部撤销")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"all\":true}")));
+			}
+			if (userMessage.contains("撤销第一个")) {
+				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
+						"ungraft_behavior", "{\"behavior_index\":0}")));
+			}
 			if (userMessage != null && userMessage.contains("\u64a4\u9500")) {
 				return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall("c1",
 						"ungraft_behavior", "{}")));
