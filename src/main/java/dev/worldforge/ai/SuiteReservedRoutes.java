@@ -39,16 +39,44 @@ public final class SuiteReservedRoutes {
 		if (userMessage == null) {
 			return null;
 		}
+		String phrase = reservedPhrase(userMessage);
+		if (phrase == null) {
+			return null;
+		}
+		// The orchestrator calls the model AGAIN after the tool result, and the
+		// newest user message is still the same undo request. Answering it with
+		// the same call a second time would try to undo an already-undone item
+		// (preparer refuses) and the refusal would clobber the round-1 success
+		// in the test's event recorder. So: the call ONCE, then a clean Final.
+		if (!ANSWERED.add(phrase)) {
+			return new Turn.Final("好了，已处理。");
+		}
+		return call(argsFor(phrase));
+	}
+
+	private static final java.util.Set<String> ANSWERED =
+			java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+	/** The reserved phrase the message contains, or null. */
+	private static String reservedPhrase(String userMessage) {
 		if (userMessage.contains("撤销第二个行为")) {
-			return call("{\"behavior_index\":1}");
+			return "撤销第二个行为";
 		}
 		if (userMessage.contains("全部撤销")) {
-			return call("{\"all\":true}");
+			return "全部撤销";
 		}
 		if (userMessage.contains("撤销第一个")) {
-			return call("{\"behavior_index\":0}");
+			return "撤销第一个";
 		}
 		return null;
+	}
+
+	private static String argsFor(String phrase) {
+		return switch (phrase) {
+			case "撤销第二个行为" -> "{\"behavior_index\":1}";
+			case "全部撤销" -> "{\"all\":true}";
+			default -> "{\"behavior_index\":0}";
+		};
 	}
 
 	/** The canonical reserved answer: one ungraft call with fixed arguments. */
