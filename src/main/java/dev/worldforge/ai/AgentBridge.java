@@ -139,9 +139,71 @@ public final class AgentBridge {
 
 	/** test/embedding hook: swap in a deterministic provider (Mock) */
 	public static void attachProviderForTesting(ModelProvider p, AgentConfig cfg) {
-		provider = p;
+		// v0.7.4: every tool-calling provider attached by a test is wrapped so
+		// the suite's RESERVED messages (see SuiteReservedRoutes) are answered
+		// identically no matter which test's provider is the global singleton.
+		provider = p instanceof ToolCallingProvider tcp
+				? withReservedRoutes(p, tcp)
+				: p;
 		config = cfg;
 		configEpoch++; // same invalidation semantics as a real reload
+	}
+
+	/**
+	 * v0.7.4: a decorator that answers RESERVED messages before delegating.
+	 * Test infrastructure only — production providers are attached elsewhere
+	 * and never wrapped.
+	 */
+	private static ModelProvider withReservedRoutes(ModelProvider base, ToolCallingProvider tools) {
+		return new ReservedRouteProvider(base, tools);
+	}
+
+	/**
+	 * v0.7.4: the reserved-route decorator. Implements BOTH provider
+	 * interfaces because the suite's mocks implement both.
+	 */
+	private static final class ReservedRouteProvider implements ModelProvider, ToolCallingProvider {
+		private final ModelProvider base;
+		private final ToolCallingProvider toolDelegate;
+
+		private ReservedRouteProvider(ModelProvider base, ToolCallingProvider toolDelegate) {
+			this.base = base;
+			this.toolDelegate = toolDelegate;
+		}
+
+		@Override
+		public java.util.concurrent.CompletableFuture<ChatTurn.Turn> completeWithTools(
+				String systemPrompt, List<ChatTurn> messages,
+				List<dev.worldforge.ops.ToolDescriptor> offeredTools) {
+			String last = "";
+			for (int i = messages.size() - 1; i >= 0; i--) {
+				if (messages.get(i).role() == ChatTurn.Role.USER) {
+					last = messages.get(i).content();
+					break;
+				}
+			}
+			ChatTurn.Turn reserved = SuiteReservedRoutes.answer(last);
+			if (reserved != null) {
+				return java.util.concurrent.CompletableFuture.completedFuture(reserved);
+			}
+			return toolDelegate.completeWithTools(systemPrompt, messages, offeredTools);
+		}
+
+		@Override
+		public java.util.concurrent.CompletableFuture<String> complete(
+				String systemPrompt, String userMessage) {
+			return base.complete(systemPrompt, userMessage);
+		}
+
+		@Override
+		public String describe() {
+			return base.describe();
+		}
+
+		@Override
+		public void cancelAll() {
+			base.cancelAll();
+		}
 	}
 
 	/** v0.5.6 test hook: reset only the rate window (keeps sessions/pending). */

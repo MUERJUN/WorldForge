@@ -140,25 +140,9 @@ public final class MockToolProvider implements ModelProvider, ToolCallingProvide
 	 * already answers it identically.</p>
 	 */
 	private static ChatTurn.Turn reservedRoute(String userMessage) {
-		if (userMessage == null) {
-			return null;
-		}
-		if (userMessage.contains("撤销第二个行为")) {
-			return reservedCall("{\"behavior_index\":1}");
-		}
-		if (userMessage.contains("全部撤销")) {
-			return reservedCall("{\"all\":true}");
-		}
-		if (userMessage.contains("撤销第一个")) {
-			return reservedCall("{\"behavior_index\":0}");
-		}
-		return null;
-	}
-
-	/** The canonical reserved answer: one ungraft call with fixed arguments. */
-	private static ChatTurn.Turn reservedCall(String argumentsJson) {
-		return new ChatTurn.Turn.Calls(List.of(new ChatTurn.ModelToolCall(
-				"reserved_ungraft", "ungraft_behavior", argumentsJson)));
+		// v0.7.4: the table lives in SuiteReservedRoutes so the AgentBridge
+		// wrapper can apply the SAME routes to every attached provider type.
+		return SuiteReservedRoutes.answer(userMessage);
 	}
 
 	/** The messages the "model" received, turn by turn. */
