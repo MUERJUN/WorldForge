@@ -62,6 +62,14 @@ public final class ToolCatalog {
 		ToolRegistry.register(GraftBehaviorTool.ungraftDescriptor(), GraftBehaviorTool.UNGRAFT_EXEC,
 				GraftBehaviorTool.UNGRAFT_PREPARER);
 
+		// ---- v0.8.0: world-instance editing (scenario A/B/C) ----
+		ToolRegistry.register(dev.worldforge.ops.tools.WorldEditTool.descriptor(),
+				dev.worldforge.ops.tools.WorldEditTool.EXECUTOR,
+				dev.worldforge.ops.tools.WorldEditTool.PREPARER);
+		ToolRegistry.register(dev.worldforge.ops.tools.UndoWorldEditTool.descriptor(),
+				dev.worldforge.ops.tools.UndoWorldEditTool.EXECUTOR,
+				dev.worldforge.ops.tools.UndoWorldEditTool.PREPARER);
+
 		// ---- long running (must not block the server thread) ----
 		ToolRegistry.register(ExportModTool.descriptor(), ExportModTool.EXECUTOR, ExportModTool.PREPARER);
 	}

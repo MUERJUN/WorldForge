@@ -28,6 +28,19 @@ import java.util.List;
  */
 public final class SuiteReservedRoutes {
 
+	/** Exact-match routes registered by test classes (v0.8.0 world edit). */
+	private static final java.util.concurrent.ConcurrentHashMap<String, java.util.function.Supplier<Turn>>
+			EXACT_ROUTES = new java.util.concurrent.ConcurrentHashMap<>();
+
+	/**
+	 * Registers an EXACT-match route for a test message. Reserved routes win
+	 * over every per-test lambda, so a world-edit test gets its planned call
+	 * no matter which provider is the global singleton.
+	 */
+	public static void registerExact(String message, java.util.function.Supplier<Turn> answer) {
+		EXACT_ROUTES.put(message, answer);
+	}
+
 	private SuiteReservedRoutes() {
 	}
 
@@ -38,6 +51,16 @@ public final class SuiteReservedRoutes {
 	public static Turn answer(String userMessage) {
 		if (userMessage == null) {
 			return null;
+		}
+		var exact = EXACT_ROUTES.get(userMessage);
+		if (exact != null) {
+			// one-shot: the orchestrator re-asks with the SAME newest user message
+			// after the tool result; answering the same call twice would loop the
+			// confirm flow forever. The second ask gets a clean final answer.
+			if (!ANSWERED.add("exact:" + userMessage)) {
+				return new Turn.Final("好了，已处理。");
+			}
+			return exact.get();
 		}
 		String phrase = reservedPhrase(userMessage);
 		if (phrase == null) {

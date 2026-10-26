@@ -36,7 +36,8 @@
       "dev.worldforge.test.WorldForgeChatFlowTests",
       "dev.worldforge.test.WorldForgeChatExportTests",
       "dev.worldforge.test.WorldForgeChatRuntimeTests",
-      "dev.worldforge.test.WorldForgeGraftTests"
+      "dev.worldforge.test.WorldForgeGraftTests",
+      "dev.worldforge.test.WorldForgeWorldEditTests"
     ]
   },
   "depends": {

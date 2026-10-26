@@ -159,7 +159,7 @@ class ChatClientStateTest {
 		dev.worldforge.ops.ToolCatalog.resetForTest();
 		dev.worldforge.ops.ToolCatalog.registerAll();
 		List<ToolDescriptor> tools = ToolRegistry.all();
-		assertEquals(14, tools.size(), "the catalogue must have exactly the 14 documented tools");
+		assertEquals(16, tools.size(), "the catalogue must have exactly the 16 documented tools (v0.8.0 adds edit_world_blocks and undo_world_edit)");
 		for (ToolDescriptor d : tools) {
 			assertNotNull(d.permission(), d.name() + " has no permission level");
 			assertNotNull(d.description(), d.name() + " has no description");

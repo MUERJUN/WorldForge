@@ -7,7 +7,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 - 游戏版本：Minecraft Java **1.21.1**
 - 加载器：Fabric Loader **0.16.9** + Fabric API **0.116.5+1.21.1**
 - 映射：Yarn **1.21.1+build.3**；Java **21**；Gradle Wrapper **8.14.3**
-- 当前版本：**v0.7.4 Public Beta**
+- 当前版本：**v0.8.0 Public Beta**
 
 ---
 
@@ -16,7 +16,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 **普通玩家安装（无需开发环境）：**
 
 1. 安装 [Fabric Loader 0.16.9](https://fabricmc.net/use/installer/)，选择 Minecraft **1.21.1**。
-2. 下载 [Fabric API 0.116.5+1.21.1](https://modrinth.com/mod/fabric-api) 与 GitHub Release 的 `worldforge-0.7.4.jar`。
+2. 下载 [Fabric API 0.116.5+1.21.1](https://modrinth.com/mod/fabric-api) 与 GitHub Release 的 `worldforge-0.8.0.jar`。
 3. 把两个 JAR 放入 `.minecraft/mods/`，启动游戏。
 4. 进入单人世界，按 **K** 打开 **AI 聊天**。
 5. 第一次使用先点聊天右上角 **⚙ 设置**，填入 API Key（单人游戏直接生效，重启无效）。
@@ -25,6 +25,7 @@ WorldForge 是 Minecraft 游戏内的 AI Mod 开发环境：安装一个 JAR，�
 
 - 「创建一把雷霆之剑，右键召唤闪电，冷却 5 秒」
 - 「给我手里的剑加上加速」 ← **v0.7.2 新增：原版物品也能获得行为**
+- 「把这块石头变成玻璃」 ← **v0.8.0 新增：直接修改真实世界（可撤销）**
 - 「把刚才的剑导出成一个独立 Mod」
 
 AI 自己判断该做什么、在游戏里执行，并把**真实发生的每一步**显示在同一条对话里。
